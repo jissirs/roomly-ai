@@ -42,6 +42,13 @@ const REQUIREMENTS = [
   'รองรับสัตว์เลี้ยง',
 ]
 
+const CREATE_STEPS = [
+  { label: 'ภาพห้อง', detail: 'ตั้งชื่อและเพิ่มภาพ', title: 'เริ่มจากห้องของคุณ', description: 'ตั้งชื่อโปรเจกต์และอัปโหลดภาพห้องจริงอย่างน้อย 1 ภาพ' },
+  { label: 'ข้อมูลพื้นที่', detail: 'ประเภทและขนาดห้อง', title: 'บอกขนาดพื้นที่', description: 'ข้อมูลนี้ช่วยให้ระบบประเมินสัดส่วนและ Space Fit ได้สมเหตุสมผลขึ้น' },
+  { label: 'แนวทาง', detail: 'สไตล์และงบประมาณ', title: 'กำหนดแบบที่ต้องการ', description: 'เลือกบรรยากาศหลักและงบสูงสุดสำหรับคัดเลือกเฟอร์นิเจอร์' },
+  { label: 'ตรวจทาน', detail: 'ความต้องการเพิ่มเติม', title: 'ตรวจข้อมูลก่อนสร้าง', description: 'เพิ่มความต้องการเฉพาะ แล้วตรวจสอบข้อมูลสำคัญอีกครั้ง' },
+]
+
 const ICON_PATHS = {
   bed: <><path d="M3 18V8m18 10V11a2 2 0 0 0-2-2H9v9M3 13h18M6 9V6h3a2 2 0 0 1 2 2v1" /></>,
   sofa: <><path d="M5 11V8a3 3 0 0 1 3-3h8a3 3 0 0 1 3 3v3M5 19v-2m14 2v-2M4 11a2 2 0 0 0-2 2v4h20v-4a2 2 0 0 0-2-2 2 2 0 0 0-2 2v1H6v-1a2 2 0 0 0-2-2Z" /></>,
@@ -74,6 +81,9 @@ function CreateProjectPage() {
   const [style, setStyle] = useState(existingProject?.style ?? 'japandi')
   const [budget, setBudget] = useState(existingProject?.budget ?? 20000)
   const [requirements, setRequirements] = useState(existingProject?.requirements ?? ['เพิ่มพื้นที่จัดเก็บ'])
+  const [dimensions, setDimensions] = useState(existingProject?.dimensions ?? { width: '', length: '', height: '' })
+  const [notes, setNotes] = useState(existingProject?.notes ?? '')
+  const [activeStep, setActiveStep] = useState(0)
   const [isSaving, setIsSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
 
@@ -134,6 +144,8 @@ function CreateProjectPage() {
       style,
       budget,
       requirements,
+      dimensions,
+      notes: notes.trim(),
       hasRoomImage: true,
       imageCount: existingProject
         ? (existingProject.imageCount ?? 1) + roomImages.length
@@ -160,6 +172,17 @@ function CreateProjectPage() {
     }
   }
 
+  const canContinue = activeStep === 0
+    ? Boolean(projectName.trim() && hasRoomImage)
+    : activeStep === 1
+      ? Boolean(dimensions.width && dimensions.length)
+      : true
+
+  function continueFlow() {
+    if (!canContinue) return
+    setActiveStep((current) => Math.min(current + 1, CREATE_STEPS.length - 1))
+  }
+
   return (
     <div className="project-shell">
       <aside className="project-sidebar">
@@ -168,7 +191,7 @@ function CreateProjectPage() {
         <div className="project-progress-copy">
           <p>NEW PROJECT</p>
           <strong>สร้างห้องของคุณ</strong>
-          <span>ขั้นตอนที่ 1 จาก 6</span>
+          <span>Room Input · {activeStep + 1} จาก {CREATE_STEPS.length}</span>
         </div>
 
         <nav className="project-flow" aria-label="ขั้นตอนสร้างโปรเจกต์">
@@ -204,12 +227,23 @@ function CreateProjectPage() {
         <main className="project-content">
           <header className="project-heading">
             <p className="project-eyebrow">01 · ROOM INPUT & PREFERENCE</p>
-            <h1>เริ่มต้นด้วยห้องเปล่าของคุณ</h1>
-            <p>รายละเอียด สัดส่วน และภาพห้องเปล่าจะช่วยให้ AI จัดวางเฟอร์นิเจอร์ได้เหมาะกับพื้นที่ สไตล์ และงบ</p>
+            <h1>{CREATE_STEPS[activeStep].title}</h1>
+            <p>{CREATE_STEPS[activeStep].description}</p>
           </header>
 
+          <ol className="project-create-steps" aria-label="ขั้นตอนสร้างโปรเจกต์">
+            {CREATE_STEPS.map((step, index) => (
+              <li className={`${index === activeStep ? 'is-active' : ''} ${index < activeStep ? 'is-complete' : ''}`.trim()} key={step.label}>
+                <button type="button" onClick={() => index <= activeStep && setActiveStep(index)} disabled={index > activeStep} aria-current={index === activeStep ? 'step' : undefined}>
+                  <span>{index < activeStep ? '✓' : String(index + 1).padStart(2, '0')}</span>
+                  <strong>{step.label}</strong><small>{step.detail}</small>
+                </button>
+              </li>
+            ))}
+          </ol>
+
           <form className="project-form" onSubmit={handleSubmit}>
-            <section className="project-section project-name-section">
+            <section className={`project-section project-name-section ${activeStep === 0 ? '' : 'is-hidden'}`}>
               <div className="project-section-heading">
                 <span>00</span>
                 <div><h2>ตั้งชื่อโปรเจกต์</h2><p>ตั้งชื่อให้จำง่ายเพื่อค้นหาในคลังภายหลัง</p></div>
@@ -226,7 +260,7 @@ function CreateProjectPage() {
                 />
               </label>
             </section>
-            <section className="project-section">
+            <section className={`project-section ${activeStep === 0 ? '' : 'is-hidden'}`}>
               <div className="project-section-heading">
                 <span>01</span>
                 <div><h2>อัปโหลดภาพห้องเปล่า</h2><p>เพิ่มได้หลายห้อง เลือกหลายไฟล์พร้อมกัน หรือกลับมาเพิ่มทีละภาพก็ได้</p></div>
@@ -288,7 +322,7 @@ function CreateProjectPage() {
               ) : null}
             </section>
 
-            <section className="project-section">
+            <section className={`project-section ${activeStep === 1 ? '' : 'is-hidden'}`}>
               <div className="project-section-heading">
                 <span>02</span>
                 <div><h2>ข้อมูลพื้นฐานของห้อง</h2><p>เลือกประเภทห้องและระบุขนาดโดยประมาณ</p></div>
@@ -309,14 +343,14 @@ function CreateProjectPage() {
               </fieldset>
 
               <div className="project-fields-row project-dimensions">
-                <label><span>ความกว้าง</span><span className="project-input-unit"><input type="number" min="1" step="0.1" placeholder="3.0" /><i>ม.</i></span></label>
-                <label><span>ความยาว</span><span className="project-input-unit"><input type="number" min="1" step="0.1" placeholder="4.0" /><i>ม.</i></span></label>
-                <label><span>ความสูง</span><span className="project-input-unit"><input type="number" min="1" step="0.1" placeholder="2.6" /><i>ม.</i></span></label>
+                <label><span>ความกว้าง <b>*</b></span><span className="project-input-unit"><input type="number" min="1" step="0.1" value={dimensions.width} onChange={(event) => setDimensions((current) => ({ ...current, width: event.target.value }))} placeholder="3.0" /><i>ม.</i></span></label>
+                <label><span>ความยาว <b>*</b></span><span className="project-input-unit"><input type="number" min="1" step="0.1" value={dimensions.length} onChange={(event) => setDimensions((current) => ({ ...current, length: event.target.value }))} placeholder="4.0" /><i>ม.</i></span></label>
+                <label><span>ความสูง</span><span className="project-input-unit"><input type="number" min="1" step="0.1" value={dimensions.height} onChange={(event) => setDimensions((current) => ({ ...current, height: event.target.value }))} placeholder="2.6" /><i>ม.</i></span></label>
               </div>
               <p className="project-field-note">ขนาดห้องใช้สำหรับประเมิน Space Fit ใน V1 กรุณากรอกค่าที่วัดได้จริง</p>
             </section>
 
-            <section className="project-section">
+            <section className={`project-section ${activeStep === 2 ? '' : 'is-hidden'}`}>
               <div className="project-section-heading">
                 <span>03</span>
                 <div><h2>สไตล์ที่ชอบ</h2><p>เลือกแนวทางหลักสำหรับการออกแบบและจับคู่สินค้า</p></div>
@@ -337,7 +371,7 @@ function CreateProjectPage() {
               </fieldset>
             </section>
 
-            <section className="project-section">
+            <section className={`project-section ${activeStep === 2 ? '' : 'is-hidden'}`}>
               <div className="project-section-heading">
                 <span>04</span>
                 <div><h2>งบประมาณ</h2><p>ระบบจะใช้ยอดนี้เป็นข้อจำกัดในการเลือกชุดสินค้า</p></div>
@@ -350,7 +384,7 @@ function CreateProjectPage() {
               </div>
             </section>
 
-            <section className="project-section">
+            <section className={`project-section ${activeStep === 3 ? '' : 'is-hidden'}`}>
               <div className="project-section-heading">
                 <span>05</span>
                 <div><h2>ความต้องการเพิ่มเติม</h2><p>เลือกได้มากกว่าหนึ่งข้อเพื่อช่วยจัดลำดับ Function / Need</p></div>
@@ -367,13 +401,28 @@ function CreateProjectPage() {
 
               <label className="project-textarea-field">
                 <span>รายละเอียดอื่น ๆ <small>(ไม่บังคับ)</small></span>
-                <textarea rows="4" placeholder="เช่น อยากเก็บโต๊ะทำงานเดิม ต้องการทางเดินกว้าง หรือมีสีที่ไม่ต้องการ" />
+                <textarea rows="4" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="เช่น อยากเก็บโต๊ะทำงานเดิม ต้องการทางเดินกว้าง หรือมีสีที่ไม่ต้องการ" />
               </label>
+
+              <div className="project-review-card">
+                <div className="project-review-heading"><span>PROJECT SUMMARY</span><strong>{projectName || 'ยังไม่ได้ตั้งชื่อโปรเจกต์'}</strong></div>
+                <dl>
+                  <div><dt>ภาพห้อง</dt><dd>{roomImages.length || existingProject?.imageCount || 0} ภาพ</dd></div>
+                  <div><dt>ประเภท</dt><dd>{ROOM_TYPES.find((item) => item.value === roomType)?.label}</dd></div>
+                  <div><dt>ขนาด</dt><dd>{dimensions.width || '–'} × {dimensions.length || '–'}{dimensions.height ? ` × ${dimensions.height}` : ''} ม.</dd></div>
+                  <div><dt>สไตล์</dt><dd>{STYLES.find((item) => item.value === style)?.label}</dd></div>
+                  <div><dt>งบสูงสุด</dt><dd>฿{budgetLabel}</dd></div>
+                  <div><dt>ความต้องการ</dt><dd>{requirements.length ? `${requirements.length} ข้อ` : 'ไม่ระบุ'}</dd></div>
+                </dl>
+              </div>
             </section>
 
             <footer className="project-form-footer">
-              <div><strong>{saveError || 'ขั้นตอนถัดไป'}</strong><span>{saveError ? 'ไฟล์เดิมยังอยู่ในหน้านี้' : 'AI Generate แบบตกแต่งพร้อมจัดวางเฟอร์นิเจอร์'}</span></div>
-              <button className="project-next-button" type="submit" disabled={!hasRoomImage || !projectName.trim() || isSaving}>{isSaving ? 'กำลังบันทึกภาพ...' : existingProject ? 'บันทึกการแก้ไข' : 'บันทึกร่างและไปต่อ'} {!isSaving ? <Icon name="arrow" size={18} /> : null}</button>
+              <div><strong>{saveError || `ขั้นตอน ${activeStep + 1} จาก ${CREATE_STEPS.length}`}</strong><span>{saveError ? 'ไฟล์เดิมยังอยู่ในหน้านี้' : CREATE_STEPS[activeStep].detail}</span></div>
+              <div className="project-footer-actions">
+                {activeStep > 0 ? <button className="project-back-button" type="button" onClick={() => setActiveStep((current) => current - 1)}>ย้อนกลับ</button> : null}
+                {activeStep < CREATE_STEPS.length - 1 ? <button className="project-next-button" type="button" onClick={continueFlow} disabled={!canContinue}>ไปต่อ <Icon name="arrow" size={18} /></button> : <button className="project-next-button" type="submit" disabled={!hasRoomImage || !projectName.trim() || !dimensions.width || !dimensions.length || isSaving}>{isSaving ? 'กำลังบันทึกภาพ...' : existingProject ? 'บันทึกการแก้ไข' : 'สร้างโปรเจกต์และไปต่อ'} {!isSaving ? <Icon name="arrow" size={18} /> : null}</button>}
+              </div>
             </footer>
           </form>
         </main>
