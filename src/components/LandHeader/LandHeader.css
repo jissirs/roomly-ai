@@ -1,0 +1,82 @@
+.landing-nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 28px 56px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .landing-nav {
+    opacity: 0;
+    animation: landing-nav-fade-in 0.8s ease forwards;
+  }
+
+  @keyframes landing-nav-fade-in {
+    from {
+      opacity: 0;
+      transform: translateY(-12px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
+
+.landing-nav-links {
+  display: flex;
+  gap: 40px;
+}
+
+.landing-nav-links a {
+  text-decoration: none;
+  font-size: 14px;
+  color: var(--color-taupe);
+  transition: color 0.2s ease;
+}
+
+.landing-nav-links a:hover {
+  color: var(--color-white);
+}
+
+.landing-nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.landing-link-muted {
+  text-decoration: none;
+  font-size: 14px;
+  color: var(--color-taupe);
+}
+
+.landing-nav .landing-logo {
+  text-shadow: none;
+}
+
+.landing-nav .landing-btn-primary {
+  background: var(--color-cream);
+  border: 0;
+  box-shadow: none;
+}
+
+.landing-nav .landing-btn-primary:hover {
+  background: var(--color-white);
+  box-shadow: none;
+}
+
+@media (max-width: 960px) {
+  .landing-nav {
+    padding: 20px 24px;
+  }
+
+  .landing-nav-links {
+    display: none;
+  }
+}
