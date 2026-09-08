@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { getProject, PROJECT_FLOW, removeProject } from '../../lib/projects'
+import { getProject, PROJECT_FLOW, removeProject, updateProject } from '../../lib/projects'
 import { deleteProjectImages, getProjectImages } from '../../lib/imageStore'
 import './ProjectDetailPage.css'
 
@@ -59,6 +59,8 @@ function ProjectDetailPage() {
   const project = getProject(id)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [heroImage, setHeroImage] = useState('')
+  const [aiInstructions, setAiInstructions] = useState(() => project?.aiInstructions ?? project?.notes ?? '')
+  const [instructionStatus, setInstructionStatus] = useState('')
 
   useEffect(() => {
     let cancelled = false
@@ -105,6 +107,12 @@ function ProjectDetailPage() {
     deleteProjectImages(project.id).catch(() => {})
     removeProject(project.id)
     navigate('/home')
+  }
+
+  function saveAiInstructions(continueAfterSave = false) {
+    updateProject(project.id, { aiInstructions: aiInstructions.trim() })
+    setInstructionStatus('บันทึกแล้ว')
+    if (continueAfterSave) navigate(resumeAction.path)
   }
 
   return (
@@ -182,11 +190,32 @@ function ProjectDetailPage() {
               <strong>ไม่ระบุ</strong>
             )}
           </div>
+          <div className="detail-card detail-ai-card">
+            <div className="detail-ai-heading">
+              <div><span>คำอธิบายเพิ่มเติมสำหรับ AI</span><small>AI DESIGN BRIEF</small></div>
+              <em>{aiInstructions.length}/600</em>
+            </div>
+            <textarea
+              value={aiInstructions}
+              maxLength="600"
+              rows="5"
+              onChange={(event) => {
+                setAiInstructions(event.target.value)
+                setInstructionStatus('')
+              }}
+              placeholder="เช่น อยากให้ห้องดูโปร่ง ใช้โทนไม้สว่าง เก็บโต๊ะเดิมไว้ เพิ่มมุมอ่านหนังสือ และหลีกเลี่ยงเฟอร์นิเจอร์สีดำ"
+              aria-label="คำอธิบายเพิ่มเติมสำหรับ AI"
+            />
+            <div className="detail-ai-footer">
+              <p>ระบุของที่อยากเก็บ สีที่ชอบ ฟังก์ชันที่ต้องมี หรือสิ่งที่ไม่ต้องการ</p>
+              <button type="button" onClick={() => saveAiInstructions(false)}>{instructionStatus || 'บันทึกคำอธิบาย'}</button>
+            </div>
+          </div>
         </div>
 
-        <Link className="detail-primary-button" to={resumeAction.path}>
+        <button className="detail-primary-button" type="button" onClick={() => saveAiInstructions(true)}>
           {resumeAction.label} <span aria-hidden="true">→</span>
-        </Link>
+        </button>
       </main>
 
       {confirmingDelete ? (

@@ -107,6 +107,14 @@ function GeneratePage() {
           <span className={`generate-phase is-${phase}`}>{phase === 'done' ? 'สร้างแบบแล้ว' : phase === 'generating' ? 'กำลังสร้างแบบ' : 'พร้อมสร้างแบบ'}</span>
         </header>
 
+        {project.aiInstructions ? (
+          <section className="generate-ai-brief" aria-label="คำอธิบายเพิ่มเติมสำหรับ AI">
+            <div><span>AI DESIGN BRIEF</span><strong>สิ่งที่ต้องคำนึงถึงในการออกแบบ</strong></div>
+            <p>{project.aiInstructions}</p>
+            <Link to={`/project/${project.id}`}>แก้ไข</Link>
+          </section>
+        ) : null}
+
         {phase === 'done' && images.length ? (
           <section className="generate-comparisons" aria-label="ภาพเปรียบเทียบก่อนและหลัง">
             <div className="generate-comparisons-heading">
