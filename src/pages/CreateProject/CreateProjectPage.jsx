@@ -21,18 +21,18 @@ const ROOM_TYPES = [
 ]
 
 const STYLES = [
-  { value: 'minimal', label: 'Minimal', palette: ['#ded5c7', '#928777', '#f3eee6'] },
-  { value: 'japandi', label: 'Japandi', palette: ['#b49772', '#ece3d5', '#6d5a46'] },
-  { value: 'modern', label: 'Modern', palette: ['#272523', '#918a82', '#d8d3cc'] },
-  { value: 'scandinavian', label: 'Scandinavian', palette: ['#eee9df', '#c5aa83', '#9daa9d'] },
-  { value: 'contemporary', label: 'Contemporary', palette: ['#d9d4cb', '#796f68', '#263238'] },
-  { value: 'luxury', label: 'Luxury', palette: ['#1d1b19', '#b59458', '#eee5d4'] },
-  { value: 'industrial', label: 'Industrial', palette: ['#30302f', '#86654b', '#a9a39b'] },
-  { value: 'mid-century', label: 'Mid-century', palette: ['#bf6b3f', '#d9b778', '#3c594f'] },
-  { value: 'classic', label: 'Classic', palette: ['#ede4d4', '#8b6b4f', '#6b2832'] },
-  { value: 'bohemian', label: 'Bohemian', palette: ['#b76e48', '#d6b86e', '#65715a'] },
-  { value: 'coastal', label: 'Coastal', palette: ['#e7e2d8', '#9bb9c3', '#59798b'] },
-  { value: 'wabi-sabi', label: 'Wabi-sabi', palette: ['#b2a18c', '#d8cdbd', '#70675c'] },
+  { value: 'minimal', label: 'Minimal', description: 'เรียบ โปร่ง ใช้เท่าที่จำเป็น', materials: ['Light wood', 'Linen'], palette: ['#ded5c7', '#928777', '#f3eee6'] },
+  { value: 'japandi', label: 'Japandi', description: 'อบอุ่น สงบ สมดุลแบบญี่ปุ่น', materials: ['Oak', 'Natural'], palette: ['#b49772', '#ece3d5', '#6d5a46'] },
+  { value: 'modern', label: 'Modern', description: 'เส้นสายชัดและโทนเข้มร่วมสมัย', materials: ['Metal', 'Stone'], palette: ['#272523', '#918a82', '#d8d3cc'] },
+  { value: 'scandinavian', label: 'Scandinavian', description: 'สว่าง เป็นกันเอง และใช้งานง่าย', materials: ['Pine', 'Soft fabric'], palette: ['#eee9df', '#c5aa83', '#9daa9d'] },
+  { value: 'contemporary', label: 'Contemporary', description: 'เรียบหรูด้วยรูปทรงและสีปัจจุบัน', materials: ['Glass', 'Textile'], palette: ['#d9d4cb', '#796f68', '#263238'] },
+  { value: 'luxury', label: 'Luxury', description: 'เข้ม ละเอียด และมีจุดเด่นหรูหรา', materials: ['Brass', 'Velvet'], palette: ['#1d1b19', '#b59458', '#eee5d4'] },
+  { value: 'industrial', label: 'Industrial', description: 'ดิบ เท่ เน้นวัสดุและโครงสร้าง', materials: ['Steel', 'Concrete'], palette: ['#30302f', '#86654b', '#a9a39b'] },
+  { value: 'mid-century', label: 'Mid-century', description: 'เรโทรอบอุ่นกับรูปทรงเหนือกาลเวลา', materials: ['Walnut', 'Leather'], palette: ['#bf6b3f', '#d9b778', '#3c594f'] },
+  { value: 'classic', label: 'Classic', description: 'สง่างาม สมมาตร และมีรายละเอียด', materials: ['Dark wood', 'Brass'], palette: ['#ede4d4', '#8b6b4f', '#6b2832'] },
+  { value: 'bohemian', label: 'Bohemian', description: 'อิสระ มีสีสันและพื้นผิวหลากหลาย', materials: ['Rattan', 'Pattern'], palette: ['#b76e48', '#d6b86e', '#65715a'] },
+  { value: 'coastal', label: 'Coastal', description: 'เบาสบาย สว่าง และสดชื่น', materials: ['White oak', 'Cotton'], palette: ['#e7e2d8', '#9bb9c3', '#59798b'] },
+  { value: 'wabi-sabi', label: 'Wabi-sabi', description: 'สงบนิ่ง เห็นความงามของธรรมชาติ', materials: ['Clay', 'Raw wood'], palette: ['#b2a18c', '#d8cdbd', '#70675c'] },
 ]
 
 const REQUIREMENTS = [
@@ -359,11 +359,19 @@ function CreateProjectPage() {
               <fieldset className="project-fieldset">
                 <legend className="sr-only">เลือกสไตล์</legend>
                 <div className="project-style-grid">
-                  {STYLES.map((item) => (
+                  {STYLES.map((item, index) => (
                     <label className={`project-style-card ${style === item.value ? 'is-selected' : ''}`.trim()} key={item.value}>
                       <input type="radio" name="style" value={item.value} checked={style === item.value} onChange={() => setStyle(item.value)} />
-                      <span className="project-style-palette">{item.palette.map((color) => <i style={{ background: color }} key={color} />)}</span>
-                      <strong>{item.label}</strong>
+                      <span className="project-style-visual" aria-hidden="true">
+                        <i className="is-primary" style={{ background: item.palette[0] }} />
+                        <span><i style={{ background: item.palette[1] }} /><i style={{ background: item.palette[2] }} /></span>
+                        <b>{String(index + 1).padStart(2, '0')}</b>
+                      </span>
+                      <span className="project-style-copy">
+                        <strong>{item.label}</strong>
+                        <small>{item.description}</small>
+                      </span>
+                      <span className="project-style-materials" aria-hidden="true">{item.materials.map((material) => <i key={material}>{material}</i>)}</span>
                       {style === item.value ? <span className="project-style-check"><Icon name="check" size={12} /></span> : null}
                     </label>
                   ))}
