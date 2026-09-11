@@ -1,0 +1,53 @@
+.decision-outline-shape {
+  fill: rgba(255, 255, 255, 0.025);
+  stroke: rgba(255, 255, 255, 0.7);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: fill 0.2s ease, stroke-width 0.2s ease, filter 0.2s ease;
+}
+
+.decision-outline-shape.is-keep {
+  fill: rgba(112, 196, 107, 0.055);
+  stroke: #70c46b;
+  filter: drop-shadow(0 0 2px rgba(112, 196, 107, 0.5));
+}
+
+.decision-outline-shape.is-replace {
+  fill: rgba(225, 163, 58, 0.055);
+  stroke: #e1a33a;
+  filter: drop-shadow(0 0 2px rgba(225, 163, 58, 0.5));
+}
+
+.decision-outline-shape.is-remove {
+  fill: rgba(221, 104, 94, 0.05);
+  stroke: #dd685e;
+  filter: drop-shadow(0 0 2px rgba(221, 104, 94, 0.48));
+}
+
+.decision-outline-shape.is-active {
+  fill-opacity: 1;
+  stroke-width: 2.2;
+}
+
+.decision-hotspot {
+  background: #70b866;
+  border-width: 2px;
+  border-color: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.38), 0 0 0 1px rgba(0, 0, 0, 0.08);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.decision-hotspot.is-replace {
+  background: #d89a32;
+}
+
+.decision-hotspot.is-remove {
+  background: #d95f55;
+}
+
+.decision-hotspot:hover,
+.decision-hotspot.is-active {
+  transform: translate(-50%, -50%) scale(1.13);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.44), 0 0 0 3px rgba(255, 255, 255, 0.2);
+}

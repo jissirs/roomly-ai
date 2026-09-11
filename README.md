@@ -1,16 +1,22 @@
-# React + Vite
+# Roomly AI
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+AI Interior Decision Platform — อัปโหลดภาพห้องจริง ให้ AI ออกแบบใหม่ ตัดสินใจเก็บ/เปลี่ยน/นำเฟอร์นิเจอร์ออก แล้วจับคู่กับสินค้าจริงจาก IKEA / Shopee
 
-Currently, two official plugins are available:
+## โครงสร้างโปรเจกต์
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+```
+RoomlyAI/
+├── frontend/   # React + Vite app (ดู frontend/README.md)
+└── backend/    # ยังไม่เริ่มพัฒนา (ดู backend/README.md)
+```
 
-## React Compiler
+ตอนนี้ระบบเป็น **frontend-only** — ข้อมูลโปรเจกต์และภาพเก็บอยู่ใน localStorage / IndexedDB ของเบราว์เซอร์ ยังไม่มี backend หรือ auth จริง
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## เริ่มพัฒนา
 
-## Expanding the Oxlint configuration
+```bash
+npm --prefix frontend install
+npm --prefix frontend run dev
+```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+หรือ `cd frontend && npm install && npm run dev`

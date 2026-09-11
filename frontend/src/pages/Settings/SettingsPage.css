@@ -1,0 +1,15 @@
+.settings-shell{min-height:100svh;color:var(--color-white);background:radial-gradient(circle at 92% 4%,rgba(91,71,48,.13),transparent 30%),#130e0d}
+.settings-topbar{min-height:78px;display:flex;align-items:center;justify-content:space-between;gap:24px;padding:18px clamp(28px,4vw,62px);background:rgba(19,14,13,.78);border-bottom:1px solid rgba(220,204,170,.09);backdrop-filter:blur(14px)}
+.settings-topbar a{color:var(--color-taupe);font-size:11px;text-decoration:none;transition:color .2s ease}.settings-topbar a:hover{color:var(--color-white)}
+.settings-topbar span{color:var(--color-tan);font-size:9px;font-weight:600;letter-spacing:1.7px}
+
+.settings-content{width:min(100%,560px);margin:0 auto;padding:54px 20px 88px}
+.settings-eyebrow{color:var(--color-tan);font-size:9px;font-weight:600;letter-spacing:2.1px}
+.settings-content h1{margin-top:10px;font-size:clamp(28px,4vw,38px);letter-spacing:-.02em}
+
+.settings-card{display:grid;gap:16px;margin-top:32px;padding:24px;background:rgba(31,23,19,.7);border:1px solid rgba(220,204,170,.1);border-radius:16px}
+.settings-card>div{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.settings-card span{color:var(--color-taupe);font-size:11px}
+.settings-card strong{font-family:var(--font-serif);font-size:14px;font-weight:500}
+
+.settings-note{margin-top:18px;color:var(--color-warm-gray);font-size:10px;line-height:1.7}
