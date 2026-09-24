@@ -242,8 +242,13 @@ async def generate_room(
     image_url: str | None = None,
     requirements: list[str] | None = None,
     budget: int | None = None,
+    products: list[dict[str, str]] | None = None,
 ) -> bytes:
     """Generates a redesigned version of the room and returns raw PNG bytes.
+
+    `products` — real catalog items ({name, category, image_url}) to furnish
+    the room with. Their photos are sent as reference images so the result
+    shows those exact products (no after-the-fact "closest match" needed).
 
     When `image_url` (the user's uploaded room photo) is given, this edits
     that photo directly with gpt-image-1 so the result reflects the user's
@@ -273,7 +278,28 @@ async def generate_room(
     )
     if requirements:
         prompt += f" The room must also satisfy: {', '.join(requirements)}."
-    if budget is not None:
+    reference_images: list[tuple[str, bytes, str]] = []
+    if image_url and products:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as product_client:
+            for index, product in enumerate(products[:8], start=1):
+                try:
+                    reply = await product_client.get(product["image_url"])
+                    reply.raise_for_status()
+                except (httpx.HTTPError, KeyError):
+                    continue
+                mime = reply.headers.get("content-type", "image/jpeg").split(";")[0]
+                extension = "png" if "png" in mime else "webp" if "webp" in mime else "jpg"
+                reference_images.append((f"product{index}.{extension}", reply.content, mime))
+                product["_ref"] = str(len(reference_images) + 1)
+        used = [item for item in products[:8] if item.get("_ref")]
+        listing = "; ".join(f"image {item['_ref']} = {item['name']} ({item['category']})" for item in used)
+        prompt += (
+            " IMPORTANT: image 1 is the room. The other images are REAL products for sale. "
+            f"Furnish the room using exactly these products: {listing}. Reproduce each product's "
+            "exact shape, colour, material and proportions faithfully and place each one naturally "
+            "and at realistic scale. Do not invent other major furniture that is not in this list."
+        )
+    elif budget is not None:
         prompt += (
             f" HARD BUDGET LIMIT: the complete furniture and decor concept must be "
             f"realistically achievable within THB {budget:,}; use fewer, practical, "
@@ -288,7 +314,7 @@ async def generate_room(
             response = await http_client.get(image_url)
             response.raise_for_status()
             image_bytes = response.content
-        return await edit_image(prompt, image_bytes)
+        return await edit_image(prompt, image_bytes, reference_images or None)
 
     return await generate_image(prompt)
 

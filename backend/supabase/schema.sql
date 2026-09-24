@@ -87,3 +87,34 @@ create policy "Authenticated users can delete room images"
 create policy "Anyone can view room images"
   on storage.objects for select
   using (bucket_id = 'room-images');
+
+-- Project checkpoints: named snapshots of a project's editable state, so a
+-- user can roll back after changing style/budget/decisions/AI results.
+-- Generated images stay in Storage, so restoring never re-runs (or re-bills) AI.
+create table if not exists public.project_checkpoints (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references public.projects(id) on delete cascade,
+  owner_id uuid not null references auth.users(id) on delete cascade,
+  name text not null,
+  snapshot jsonb not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists project_checkpoints_project_idx
+  on public.project_checkpoints (project_id, created_at desc);
+
+alter table public.project_checkpoints enable row level security;
+
+drop policy if exists "Users manage their own checkpoints" on public.project_checkpoints;
+create policy "Users manage their own checkpoints"
+  on public.project_checkpoints for all
+  using (auth.uid() = owner_id)
+  with check (
+    auth.uid() = owner_id
+    and exists (select 1 from public.projects p where p.id = project_id and p.owner_id = auth.uid())
+  );
+
+-- Affiliate tracking link per product (from your affiliate network). When set,
+-- the "ดูสินค้าจริง" button uses it instead of the plain store URL.
+alter table public.products add column if not exists affiliate_url text;
+alter table public.products add column if not exists price_checked_at timestamptz;

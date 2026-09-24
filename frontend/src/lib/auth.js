@@ -18,6 +18,12 @@ export async function register(email, password, { firstName, lastName } = {}) {
     options: { data: { first_name: firstName, last_name: lastName } },
   })
   if (error) throw error
+  // With "Confirm email" enabled in Supabase, signUp succeeds but returns no
+  // session — the user can't reach /home until they click the emailed link.
+  if (!data.session) {
+    const pending = new Error('EMAIL_CONFIRMATION_REQUIRED')
+    throw pending
+  }
   return cacheUser(data.user)
 }
 

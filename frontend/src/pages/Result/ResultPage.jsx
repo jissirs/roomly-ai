@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { getProject, getRoomDesigns, updateProject, withWorkflowData } from '../../lib/projects'
 import { getProjectImages } from '../../lib/imageStore'
 import { api, ApiError } from '../../lib/api'
+import { planProducts, toGenerateProducts, toPlannedRecord } from '../../lib/productPlan'
 import '../Generate/GeneratePage.css'
 import './ResultPage.css'
 
@@ -73,7 +74,8 @@ export default function ResultPage() {
       if (project.aiInstructions) query.set('ai_instructions', project.aiInstructions)
       if (room.sourceImageUrl) query.set('source_image_url', room.sourceImageUrl)
       project.requirements?.forEach((requirement) => query.append('requirements', requirement))
-      const result = await api.post(`/projects/${project.id}/generate?${query}`)
+      const plan = planProducts({ style: project.style, budget: project.budget, roomType: project.roomType })
+      const result = await api.post(`/projects/${project.id}/generate?${query}`, { products: toGenerateProducts(plan) })
       const currentResults = roomDesigns.filter((item) => item.generatedImageUrl)
       const nextResults = [
         ...currentResults.filter((item) => item.sourceImageId !== room.sourceImageId),
@@ -84,7 +86,7 @@ export default function ResultPage() {
         .filter(Boolean)
       const updated = await updateProject(project.id, {
         generatedImageUrl: orderedResults[0]?.generatedImageUrl ?? result.image_url,
-        decisions: withWorkflowData({}, { generatedImages: orderedResults, detectedObjects: [] }),
+        decisions: withWorkflowData({}, { generatedImages: orderedResults, detectedObjects: [], plannedProducts: toPlannedRecord(plan) }),
         productSelections: {},
         estimatedTotal: null,
         stage: 'result',
@@ -114,7 +116,7 @@ export default function ResultPage() {
               before={room.sourceImageUrl}
               after={room.generatedImageUrl}
               roomNumber={index + 1}
-              key={image.id}
+              key={room.sourceImageId}
               isRegenerating={regeneratingIndex === index}
               canRegenerate={regeneratingIndex === null}
               onRegenerate={() => handleRegenerate(room, index)}

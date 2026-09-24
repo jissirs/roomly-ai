@@ -109,7 +109,11 @@ async def generate_image(prompt: str) -> bytes:
     return base64.b64decode(response.data[0].b64_json)
 
 
-async def edit_image(prompt: str, image_bytes: bytes) -> bytes:
+async def edit_image(
+    prompt: str,
+    image_bytes: bytes,
+    reference_images: list[tuple[str, bytes, str]] | None = None,
+) -> bytes:
     """Edits an existing room photo (gpt-image-1) and returns raw PNG bytes.
 
     Unlike generate_image(), this actually redesigns the pixels of the
@@ -124,9 +128,12 @@ async def edit_image(prompt: str, image_bytes: bytes) -> bytes:
         raise RuntimeError("OPENAI_API_KEY is not set")
 
     settings = get_settings()
+    # First image is the room; any reference images (e.g. real product photos
+    # to place in it) follow. gpt-image-1 accepts a list of input images.
+    images = [("room.png", image_bytes, "image/png"), *(reference_images or [])]
     response = await client.images.edit(
         model=settings.openai_image_model,
-        image=("room.png", image_bytes, "image/png"),
+        image=images if len(images) > 1 else images[0],
         prompt=prompt,
         size=settings.openai_image_size,
         quality=settings.openai_image_quality,

@@ -30,7 +30,11 @@ function RegisterPage() {
       })
       navigate('/home')
     } catch (err) {
-      setFormError(err.message === 'User already registered' ? 'อีเมลนี้มีบัญชีอยู่แล้ว' : 'สมัครสมาชิกไม่สำเร็จ กรุณาลองใหม่')
+      const message = String(err.message ?? '')
+      if (message === 'User already registered') setFormError('อีเมลนี้มีบัญชีอยู่แล้ว')
+      else if (message === 'EMAIL_CONFIRMATION_REQUIRED') setFormError('สมัครสำเร็จแล้ว กรุณายืนยันอีเมลจากลิงก์ที่ส่งไปที่กล่องจดหมาย แล้วจึงเข้าสู่ระบบ')
+      else if (/rate limit/i.test(message)) setFormError('ส่งอีเมลยืนยันบ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่')
+      else setFormError(`สมัครสมาชิกไม่สำเร็จ: ${message || 'กรุณาลองใหม่'}`)
     } finally {
       setIsSubmitting(false)
     }

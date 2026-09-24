@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { getProject, getRoomDesigns, updateProject, withWorkflowData } from '../../lib/projects'
 import { getProjectImages } from '../../lib/imageStore'
 import { api, ApiError } from '../../lib/api'
+import { planProducts, toGenerateProducts, toPlannedRecord } from '../../lib/productPlan'
 import './GeneratePage.css'
 
 const COMPLETED_GENERATION_STAGES = new Set(['result', 'object-decision', 'product-matching', 'saved'])
@@ -87,10 +88,12 @@ function GeneratePage() {
     setGenerateError('')
     setGeneratedCount(0)
     try {
+      const plan = planProducts({ style: project.style, budget: project.budget, roomType: project.roomType })
+      const plannedProducts = toPlannedRecord(plan)
       let generatedImages = []
       let updatedProject = await updateProject(project.id, {
         generatedImageUrl: null,
-        decisions: withWorkflowData({}, { generatedImages, detectedObjects: [] }),
+        decisions: withWorkflowData({}, { generatedImages, detectedObjects: [], plannedProducts }),
         productSelections: {},
         estimatedTotal: null,
         stage: 'ai-generate',
@@ -103,7 +106,7 @@ function GeneratePage() {
         if (project.aiInstructions) query.set('ai_instructions', project.aiInstructions)
         query.set('source_image_url', image.url)
         project.requirements?.forEach((requirement) => query.append('requirements', requirement))
-        const result = await api.post(`/projects/${project.id}/generate?${query}`)
+        const result = await api.post(`/projects/${project.id}/generate?${query}`, { products: toGenerateProducts(plan) })
         generatedImages = [...generatedImages, {
           sourceImageId: image.id,
           sourceImageUrl: image.url,
@@ -111,7 +114,7 @@ function GeneratePage() {
         }]
         updatedProject = await updateProject(project.id, {
           generatedImageUrl: generatedImages[0].generatedImageUrl,
-          decisions: withWorkflowData({}, { generatedImages, detectedObjects: [] }),
+          decisions: withWorkflowData({}, { generatedImages, detectedObjects: [], plannedProducts }),
         })
         setProject(updatedProject)
         setGeneratedCount(generatedImages.length)
@@ -210,11 +213,14 @@ function GeneratePage() {
             <div><span>DESIGN BUDGET</span><strong>฿{new Intl.NumberFormat('th-TH').format(project.budget)}</strong></div>
             <div><span>SELECTED STYLE</span><strong>{project.style}</strong></div>
           </div>
+          <div className="generate-footer-actions">
+            {phase !== 'generating' ? <Link className="generate-skip" to={`/project/${project.id}/decisions`}>ข้ามไปหน้า Selection</Link> : null}
           {phase === 'done' && hasAllResults ? (
             <Link className="generate-primary" to={`/project/${project.id}/result`}>ดูผลลัพธ์ที่สร้างแล้ว →</Link>
           ) : (
             <button className="generate-primary" type="button" disabled={needsReupload || isLoadingImages || phase === 'generating'} onClick={startGeneration}>{phase === 'generating' ? 'กำลังสร้างแบบ...' : phase === 'done' ? <>สร้างผลลัพธ์ให้ครบ <span aria-hidden="true">→</span></> : <>เริ่ม AI Generate <span aria-hidden="true">→</span></>}</button>
           )}
+          </div>
         </footer>
 
         <p className="generate-demo-note">ภาพหลังออกแบบสร้างโดย AI (gpt-image-1) จากภาพห้องจริงที่อัปโหลด</p>

@@ -44,6 +44,10 @@ export function getRoomDesigns(project, images = []) {
       sourceImageUrl: image.url,
       generatedImageUrl: result?.generatedImageUrl
         ?? (!stored.length && index === 0 ? project?.generatedImageUrl : undefined),
+      // Earlier/undone versions of this room's AI image (already in Storage),
+      // so removing/replacing an object can be undone without calling AI.
+      history: result?.history ?? [],
+      future: result?.future ?? [],
     }
   })
 }
@@ -72,6 +76,7 @@ function fromRow(row) {
     decisions,
     generatedImages: workflow.generatedImages ?? [],
     detectedObjects: workflow.detectedObjects ?? [],
+    plannedProducts: workflow.plannedProducts ?? [],
     replacementBriefs: decisions.__replacementBriefs ?? {},
     productSelections: row.product_selections ?? {},
     estimatedTotal: row.estimated_total ?? undefined,

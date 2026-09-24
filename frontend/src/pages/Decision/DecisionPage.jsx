@@ -131,6 +131,7 @@ function DecisionPage() {
       setIsLoading(false)
 
       let activeObjects = loaded.detectedObjects?.length ? loaded.detectedObjects : []
+      const detectionErrors = []
       const savedDecisions = loaded.decisions ?? {}
       const savedObjectDecisions = getObjectDecisions(savedDecisions)
       const savedReplacementBriefs = loaded.replacementBriefs
@@ -151,7 +152,6 @@ function DecisionPage() {
 
       if (!activeObjects.length && designs.length) {
         const detectedByRoom = []
-        const detectionErrors = []
         for (const [roomIndex, room] of designs.entries()) {
           try {
             const detectResult = await api.post(`/projects/${id}/decisions/detect`, {
@@ -275,6 +275,60 @@ function DecisionPage() {
     }))
   }
 
+  async function saveDesigns(nextDesigns, nextDecisions, extra = {}) {
+    const savedState = withWorkflowData(
+      { ...nextDecisions, __replacementBriefs: replacementBriefs },
+      { generatedImages: nextDesigns, detectedObjects: objects },
+    )
+    const updated = await updateProject(project.id, {
+      decisions: savedState,
+      generatedImageUrl: nextDesigns[0]?.generatedImageUrl,
+      estimatedTotal: total,
+      stage: 'object-decision',
+      status: 'in-progress',
+      progress: 67,
+      ...extra,
+    })
+    setRoomDesigns(nextDesigns)
+    setProject(updated)
+  }
+
+  // Swap back to an earlier (undo) or undone (redo) image: no AI call, the
+  // files are still in Storage.
+  async function stepImageHistory(direction) {
+    if (!activeRoom) return
+    const source = direction === 'undo' ? activeRoom.history ?? [] : activeRoom.future ?? []
+    const entry = source[source.length - 1]
+    if (!entry) return
+    setIsRegenerating(true)
+    setRegenerateError('')
+    try {
+      const rest = source.slice(0, -1)
+      const counterpart = {
+        imageUrl: activeRoom.generatedImageUrl,
+        objectId: entry.objectId,
+        objectName: entry.objectName,
+        action: entry.action,
+        previousDecision: entry.previousDecision,
+      }
+      const nextDesigns = roomDesigns.map((room) => room.sourceImageId !== activeRoom.sourceImageId ? room : {
+        ...room,
+        generatedImageUrl: entry.imageUrl,
+        history: direction === 'undo' ? rest : [...(room.history ?? []), counterpart].slice(-10),
+        future: direction === 'undo' ? [...(room.future ?? []), counterpart].slice(-10) : rest,
+      })
+      const nextDecisions = { ...decisions }
+      if (direction === 'undo') nextDecisions[entry.objectId] = entry.previousDecision ?? 'keep'
+      else nextDecisions[entry.objectId] = entry.action
+      setDecisions(nextDecisions)
+      await saveDesigns(nextDesigns, nextDecisions)
+    } catch (error) {
+      setRegenerateError(error.message || 'ย้อนภาพไม่สำเร็จ กรุณาลองใหม่')
+    } finally {
+      setIsRegenerating(false)
+    }
+  }
+
   async function regenerateSelection() {
     if (!activeRoom?.generatedImageUrl || !activeObject || !['replace', 'remove'].includes(activeDecision)) return
     setIsRegenerating(true)
@@ -291,25 +345,22 @@ function DecisionPage() {
         budget: activeDecision === 'replace' ? Number(activeReplacementBrief.budget) || activeObject.price : null,
       })
       const nextDesigns = roomDesigns.map((room) => room.sourceImageId === activeRoom.sourceImageId
-        ? { ...room, generatedImageUrl: result.image_url }
+        ? {
+          ...room,
+          generatedImageUrl: result.image_url,
+          history: [...(room.history ?? []), {
+            imageUrl: room.generatedImageUrl,
+            objectId: activeObject.id,
+            objectName: activeObject.name,
+            action: activeDecision,
+            previousDecision: 'keep',
+          }].slice(-10),
+          future: [],
+        }
         : room)
       const nextSelections = { ...(project.productSelections ?? {}) }
       delete nextSelections[activeObject.id]
-      const savedState = withWorkflowData(
-        { ...decisions, __replacementBriefs: replacementBriefs },
-        { generatedImages: nextDesigns, detectedObjects: objects },
-      )
-      const updated = await updateProject(project.id, {
-        decisions: savedState,
-        generatedImageUrl: nextDesigns[0]?.generatedImageUrl ?? result.image_url,
-        productSelections: nextSelections,
-        estimatedTotal: total,
-        stage: 'object-decision',
-        status: 'in-progress',
-        progress: 67,
-      })
-      setRoomDesigns(nextDesigns)
-      setProject(updated)
+      await saveDesigns(nextDesigns, decisions, { productSelections: nextSelections })
     } catch (error) {
       setRegenerateError(error.message || 'สร้างเฉพาะวัตถุนี้ไม่สำเร็จ กรุณาลองใหม่')
     } finally {
@@ -390,6 +441,16 @@ function DecisionPage() {
                 </button>
               )
             })}
+            {(activeRoom?.history?.length || activeRoom?.future?.length) ? (
+              <div className="decision-image-history" role="group" aria-label="ย้อนประวัติภาพ">
+                <button type="button" disabled={isRegenerating || !activeRoom.history?.length} onClick={() => stepImageHistory('undo')} title="กลับไปภาพก่อนหน้า ไม่เสียเครดิต AI">
+                  ↶ เลิกทำ{activeRoom.history?.length ? ` (${activeRoom.history.length})` : ''}
+                </button>
+                <button type="button" disabled={isRegenerating || !activeRoom.future?.length} onClick={() => stepImageHistory('redo')} title="ทำซ้ำภาพที่เลิกทำไป ไม่เสียเครดิต AI">
+                  ↷ ทำซ้ำ{activeRoom.future?.length ? ` (${activeRoom.future.length})` : ''}
+                </button>
+              </div>
+            ) : null}
             <span className="decision-demo-label">{isRealDetection ? 'AI DETECTED' : 'DEMO DETECTION'}{aiSuggestions ? ' · AI SCORED' : ''}</span>
           </div>
 

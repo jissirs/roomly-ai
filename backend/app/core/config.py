@@ -21,6 +21,8 @@ class Settings(BaseSettings):
 
     supabase_url: str = ""
     supabase_publishable_key: str = ""
+    # Server-only admin key, used by the no-email password reset (api/v1/auth.py).
+    supabase_service_role_key: str = ""
 
     # gpt-4o-mini: cheapest OpenAI model that still reads images and does
     # text reasoning. gpt-image-1: supports images.edit, so it redesigns the

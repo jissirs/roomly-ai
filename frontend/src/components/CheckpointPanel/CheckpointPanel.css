@@ -1,0 +1,24 @@
+.checkpoint-panel{margin-top:18px;padding:22px;color:var(--color-white);background:rgba(31,23,19,.72);border:1px solid rgba(220,204,170,.11);border-radius:18px}
+.checkpoint-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:16px}
+.checkpoint-heading span{display:block;color:var(--color-tan);font-size:9px;font-weight:600;letter-spacing:1.8px}
+.checkpoint-heading strong{display:block;margin-top:4px;font:500 20px var(--font-serif)}
+.checkpoint-heading small{color:var(--color-warm-gray);font-size:11px}
+.checkpoint-note{margin-top:8px;color:var(--color-taupe);font-size:12px;line-height:1.7}
+.checkpoint-form{display:flex;gap:10px;margin-top:14px}
+.checkpoint-form input{flex:1;min-width:0;min-height:42px;padding:0 14px;color:var(--color-white);font:13px var(--font-sans);background:rgba(255,255,255,.03);border:1px solid rgba(220,204,170,.16);border-radius:10px}
+.checkpoint-form input:focus{outline:none;border-color:rgba(220,204,170,.5)}
+.checkpoint-form button,.checkpoint-actions button{min-height:36px;padding:0 14px;color:var(--color-cream);font:600 11px var(--font-sans);white-space:nowrap;background:transparent;border:1px solid rgba(220,204,170,.25);border-radius:999px;cursor:pointer}
+.checkpoint-form button,.checkpoint-actions button.is-primary{min-height:42px;color:#1b1411;background:linear-gradient(135deg,#eadcbe,var(--color-cream));border:0}
+.checkpoint-actions button.is-primary{min-height:36px}
+.checkpoint-actions button.is-danger{color:#d18f87;border-color:rgba(209,143,135,.3)}
+.checkpoint-form button:disabled,.checkpoint-actions button:disabled{cursor:not-allowed;opacity:.45}
+.checkpoint-message{margin-top:10px;color:#9fbd91;font-size:12px}
+.checkpoint-error{margin-top:10px;color:#d18f87;font-size:12px}
+.checkpoint-list{display:grid;gap:8px;margin:14px 0 0;padding:0;list-style:none}
+.checkpoint-list li{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 14px;background:rgba(255,255,255,.02);border:1px solid rgba(220,204,170,.08);border-radius:12px}
+.checkpoint-info{min-width:0}
+.checkpoint-info strong{display:block;overflow:hidden;font-size:13px;font-weight:500;text-overflow:ellipsis;white-space:nowrap}
+.checkpoint-info small{display:block;margin-top:3px;color:var(--color-warm-gray);font-size:11px}
+.checkpoint-actions{display:flex;gap:8px;flex:0 0 auto}
+.checkpoint-list li.checkpoint-empty{justify-content:center;color:var(--color-warm-gray);font-size:12px}
+@media(max-width:640px){.checkpoint-form{flex-direction:column}.checkpoint-list li{align-items:flex-start;flex-direction:column}}

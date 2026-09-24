@@ -69,6 +69,20 @@ function mergeCatalog(databaseProducts = []) {
   return [...merged.values()]
 }
 
+function sourceHost(url) {
+  try {
+    const { hostname, pathname } = new URL(url)
+    return `${hostname.replace(/^www\./, '')}${pathname.split('/').slice(1, 3).map((part) => `/${part}`).join('')}`
+  } catch {
+    return 'หน้าสินค้า'
+  }
+}
+
+function formatCheckedDate(value) {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '-' : new Intl.DateTimeFormat('th-TH', { dateStyle: 'medium' }).format(date)
+}
+
 function ProductCard({ product, selected, disabled, onSelect, styleMatch, styleLabel }) {
   return (
     <article className={`products-card ${selected ? 'is-selected' : ''} ${disabled ? 'is-unaffordable' : ''}`.trim()}>
@@ -79,7 +93,10 @@ function ProductCard({ product, selected, disabled, onSelect, styleMatch, styleL
         <h3>{product.name}</h3>
         <p>{product.size}</p>
         <div className="products-card-price"><strong>฿{new Intl.NumberFormat('th-TH').format(product.price)}</strong><small>ราคาอ้างอิง</small></div>
-        <div className="products-card-actions"><button type="button" disabled={disabled} onClick={onSelect}>{selected ? 'เลือกแล้ว ✓' : disabled ? 'เกินงบที่กำหนด' : 'เลือกชิ้นนี้'}</button><a href={product.url} target="_blank" rel="noreferrer">ดูสินค้าจริง ↗</a></div>
+        <p className="products-card-source-note">
+          ที่มาของราคา: <a href={product.url} target="_blank" rel="noreferrer">{sourceHost(product.url)}</a> · ตรวจเมื่อ {formatCheckedDate(product.price_checked_at || product.verified_at || CATALOG_VERIFIED_AT)}
+        </p>
+        <div className="products-card-actions"><button type="button" disabled={disabled} onClick={onSelect}>{selected ? 'เลือกแล้ว ✓' : disabled ? 'เกินงบที่กำหนด' : 'เลือกชิ้นนี้'}</button><a href={product.affiliate_url || product.url} target="_blank" rel={product.affiliate_url ? 'noreferrer sponsored' : 'noreferrer'}>ดูสินค้าจริง ↗</a></div>
       </div>
     </article>
   )
@@ -119,6 +136,7 @@ function ProductsPage() {
       const catalog = mergeCatalog(data ?? [])
       setProducts(catalog)
 
+      const planned = new Set((loaded.plannedProducts ?? []).map((item) => item.productId))
       const existing = loaded.productSelections ?? {}
       let runningTotal = 0
       const initialSelections = {}
@@ -131,7 +149,8 @@ function ProductsPage() {
         const ranked = [...candidates].sort((first, second) => {
           const noteDiff = visualMatchScore(second, item, brief?.note) - visualMatchScore(first, item, brief?.note)
           const styleDiff = Number(isStyleMatch(second, loaded.style)) - Number(isStyleMatch(first, loaded.style))
-          return noteDiff || styleDiff || second.match - first.match || first.price - second.price
+          const plannedDiff = Number(planned.has(second.id)) - Number(planned.has(first.id))
+          return plannedDiff || noteDiff || styleDiff || second.match - first.match || first.price - second.price
         })
         const affordable = [preferred, ...ranked].filter(Boolean).find((product) => runningTotal + product.price <= loaded.budget)
         if (affordable) {
@@ -171,7 +190,7 @@ function ProductsPage() {
       return [objectId, {
         productId, objectName: object?.name, category: normalizeCategory(object), decision: objectDecisions[objectId] ?? 'keep',
         name: product?.name, price: product?.price, store: product?.store, sku: product?.sku, size: product?.size,
-        url: product?.url, imageUrl: product?.image_url, match: product?.match, verifiedAt: CATALOG_VERIFIED_AT,
+        url: product?.affiliate_url || product?.url, imageUrl: product?.image_url, match: product?.match, verifiedAt: CATALOG_VERIFIED_AT,
         visualTags: object?.visual_tags ?? object?.visualTags ?? [],
       }]
     }))
