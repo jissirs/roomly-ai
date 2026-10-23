@@ -34,6 +34,7 @@ const STATUS_LABELS = {
   'ai-generate': 'กำลัง Generate',
   result: 'รอดูผลลัพธ์',
   'object-decision': 'กำลังตัดสินใจ',
+  summary: 'รอดูสรุปผล',
   'product-matching': 'กำลังเลือกสินค้า',
   saved: 'บันทึกแล้ว',
 }
@@ -106,6 +107,8 @@ function ProjectDetailPage() {
   const currentStage = project.stage ?? 'room-input'
   const resumeAction = currentStage === 'saved'
     ? { label: 'ดูสรุปโปรเจกต์', path: `/project/${project.id}/summary` }
+    : currentStage === 'summary'
+    ? { label: 'ดูสรุปผลต่อ', path: `/project/${project.id}/summary` }
     : currentStage === 'product-matching'
       ? { label: 'เลือกสินค้าต่อ', path: `/project/${project.id}/products` }
       : currentStage === 'object-decision'

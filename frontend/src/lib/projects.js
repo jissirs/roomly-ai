@@ -5,7 +5,8 @@ export const PROJECT_FLOW = [
   { id: 'ai-generate', title: 'AI Generate', progress: 33 },
   { id: 'result', title: 'ดูผลลัพธ์', progress: 50 },
   { id: 'object-decision', title: 'Keep / Replace / Remove', progress: 67 },
-  { id: 'product-matching', title: 'สินค้า IKEA / Shopee', progress: 84 },
+  { id: 'summary', title: 'สรุปผลการตัดสินใจ', progress: 84 },
+  { id: 'product-matching', title: 'สินค้า IKEA / Shopee', progress: 92 },
   { id: 'saved', title: 'บันทึกโปรเจกต์', progress: 100 },
 ]
 

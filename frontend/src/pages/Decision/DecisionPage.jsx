@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { getObjectDecisions, getProject, getRoomDesigns, updateProject, withWorkflowData } from '../../lib/projects'
 import { getProjectImages } from '../../lib/imageStore'
 import { api } from '../../lib/api'
+import { REAL_PRODUCT_CATALOG } from '../../data/realProductCatalog'
 import decisionRoom from '../../assets/steps/ai-decisions.png'
 import './DecisionPage.css'
 import './DecisionOverlay.css'
@@ -23,6 +24,46 @@ const DECISIONS = [
   { id: 'replace', label: 'REPLACE', detail: 'หาสินค้าชิ้นใหม่มาแทน', icon: '↻' },
   { id: 'remove', label: 'REMOVE', detail: 'นำออกเพื่อคืนพื้นที่และงบ', icon: '−' },
 ]
+
+// Maps GPT's free-text category/id guess to the category slugs productPlan.js
+// used when it picked real catalog items to furnish the room with, so the
+// Decision page can show the item's actual real price instead of a guess.
+const CATEGORY_ALIASES = {
+  sofa: 'sofa', couch: 'sofa', sectional: 'sofa',
+  table: 'coffee-table', 'coffee-table': 'coffee-table', coffeetable: 'coffee-table',
+  chair: 'chair', armchair: 'chair', 'accent-chair': 'chair', 'dining-chair': 'chair',
+  rug: 'rug', carpet: 'rug',
+  television: 'television', tv: 'television',
+  lamp: 'lamp', lighting: 'lamp', 'floor-lamp': 'lamp', 'table-lamp': 'lamp',
+  curtain: 'curtain', curtains: 'curtain', drape: 'curtain', drapes: 'curtain',
+  plant: 'plant', plants: 'plant', decoration: 'plant', 'decor': 'plant',
+  bed: 'bed',
+  nightstand: 'nightstand', 'bedside-table': 'nightstand',
+  mirror: 'mirror',
+  desk: 'desk',
+  shelf: 'shelf', shelving: 'shelf', bookshelf: 'shelf', 'book-shelf': 'shelf',
+  cabinet: 'cabinet', wardrobe: 'cabinet', closet: 'cabinet',
+}
+
+function normalizeCategory(value) {
+  const key = String(value || '').toLowerCase().trim().replace(/\s+/g, '-')
+  return CATEGORY_ALIASES[key] ?? key
+}
+
+// Attaches the real catalog product (and its real scraped price) that was
+// actually placed in the AI-generated image for this item's category, so
+// the Decision page shows a real price instead of GPT's rough guess.
+function withRealPrice(item, plannedByCategory, catalogById) {
+  const planned = plannedByCategory[normalizeCategory(item.category)] ?? plannedByCategory[normalizeCategory(item.id)]
+  if (!planned) return item
+  const product = catalogById[planned.productId]
+  if (!product) return { ...item, price: planned.price }
+  return {
+    ...item,
+    price: planned.price,
+    realProduct: { name: product.name, store: product.store, url: product.url, price: product.price },
+  }
+}
 
 const SCORE_LABELS = ['Function', 'Space', 'Budget', 'Style', 'Availability']
 const SCORE_MAX = [30, 25, 20, 15, 10]
@@ -130,7 +171,13 @@ function DecisionPage() {
       // a full-page loading screen while the vision model is working.
       setIsLoading(false)
 
-      let activeObjects = loaded.detectedObjects?.length ? loaded.detectedObjects : []
+      const plannedByCategory = Object.fromEntries(
+        (loaded.plannedProducts ?? []).map((planned) => [planned.category, planned]),
+      )
+      const catalogById = Object.fromEntries(REAL_PRODUCT_CATALOG.map((product) => [product.id, product]))
+      const attachRealPrice = (item) => withRealPrice(item, plannedByCategory, catalogById)
+
+      let activeObjects = loaded.detectedObjects?.length ? loaded.detectedObjects.map(attachRealPrice) : []
       const detectionErrors = []
       const savedDecisions = loaded.decisions ?? {}
       const savedObjectDecisions = getObjectDecisions(savedDecisions)
@@ -159,7 +206,7 @@ function DecisionPage() {
               original_image_url: room.sourceImageUrl,
             })
             detectResult.objects?.forEach((item, itemIndex) => detectedByRoom.push({
-              ...item,
+              ...attachRealPrice(item),
               id: `${room.sourceImageId}:${item.id}:${itemIndex}`,
               sourceObjectId: item.id,
               roomId: room.sourceImageId,
@@ -242,8 +289,8 @@ function DecisionPage() {
   async function continueToProducts() {
     const storedDesigns = roomDesigns.map((room) => ({ ...room }))
     const savedState = withWorkflowData({ ...decisions, __replacementBriefs: replacementBriefs }, { generatedImages: storedDesigns, detectedObjects: objects })
-    await updateProject(project.id, { decisions: savedState, estimatedTotal: total, stage: 'product-matching', status: 'in-progress', progress: 84 })
-    navigate(`/project/${project.id}/products`)
+    await updateProject(project.id, { decisions: savedState, estimatedTotal: total, stage: 'summary', status: 'in-progress', progress: 84 })
+    navigate(`/project/${project.id}/summary`)
   }
 
   async function saveDraft() {
@@ -455,7 +502,25 @@ function DecisionPage() {
           </div>
 
           <aside className={`decision-panel is-${activeDecision}`}>
-            <div className="decision-object-title"><span>{activeObject.category}</span><small>ห้อง {activeObject.roomNumber ?? 1} · รายการ {visibleObjects.findIndex((item) => item.id === activeObject.id) + 1} / {visibleObjects.length}</small><h2>{activeObject.name}</h2><p>ราคาประเมิน ฿{new Intl.NumberFormat('th-TH').format(activeObject.price)}</p></div>
+            <div className="decision-object-title">
+              <span>{activeObject.category}</span>
+              <small>ห้อง {activeObject.roomNumber ?? 1} · รายการ {visibleObjects.findIndex((item) => item.id === activeObject.id) + 1} / {visibleObjects.length}</small>
+              <h2>{activeObject.name}</h2>
+              {activeObject.realProduct ? (
+                <p className="decision-real-price">
+                  ราคาจริง ฿{new Intl.NumberFormat('th-TH').format(activeObject.price)}
+                  {activeObject.realProduct.url ? (
+                    <a className="decision-real-price-source" href={activeObject.realProduct.url} target="_blank" rel="noreferrer">
+                      {activeObject.realProduct.store} · {activeObject.realProduct.name}
+                    </a>
+                  ) : (
+                    <span className="decision-real-price-source">{activeObject.realProduct.store} · {activeObject.realProduct.name}</span>
+                  )}
+                </p>
+              ) : (
+                <p>ราคาประเมิน ฿{new Intl.NumberFormat('th-TH').format(activeObject.price)}</p>
+              )}
+            </div>
 
             <div className="decision-score-summary"><div><strong>{activeObject.score}</strong><span>/ 100</span></div><p>{activeObject.reason}</p>{detectError || aiError ? <small className="decision-ai-error">{detectError || aiError}</small> : null}</div>
 
@@ -503,7 +568,7 @@ function DecisionPage() {
         <footer className="decision-footer">
           <div><span>ยอดประมาณการใหม่</span><strong>฿{new Intl.NumberFormat('th-TH').format(total)}</strong><small className={total > project.budget ? 'is-over' : ''}>{total <= project.budget ? `เหลืองบ ฿${new Intl.NumberFormat('th-TH').format(project.budget - total)}` : `เกินงบ ฿${new Intl.NumberFormat('th-TH').format(total - project.budget)}`}</small></div>
           <p className={isOverBudget ? 'is-over' : ''}>{isOverBudget ? <>ต้องลดอีก <b>฿{new Intl.NumberFormat('th-TH').format(total - project.budget)}</b> ก่อนดำเนินการต่อ</> : <><b>{decisionCounts.replace}</b> รายการรอหาสินค้าทดแทน · <b>{decisionCounts.remove}</b> รายการจะถูกนำออก</>}</p>
-          <button type="button" disabled={isOverBudget || isRegenerating} onClick={continueToProducts}>{isOverBudget ? 'ยอดรวมยังเกินงบ' : isRegenerating ? 'รอ AI สร้างภาพให้เสร็จ' : decisionCounts.replace ? `ไปเลือกสินค้าทดแทน ${decisionCounts.replace} รายการ` : 'ยืนยันและไปจับคู่สินค้า'} <span>{isOverBudget ? '!' : '→'}</span></button>
+          <button type="button" disabled={isOverBudget || isRegenerating} onClick={continueToProducts}>{isOverBudget ? 'ยอดรวมยังเกินงบ' : isRegenerating ? 'รอ AI สร้างภาพให้เสร็จ' : 'ยืนยันและไปดูสรุป'} <span>{isOverBudget ? '!' : '→'}</span></button>
         </footer>
       </main>
     </div>

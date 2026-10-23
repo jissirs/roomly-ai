@@ -1,4 +1,4 @@
-"""Pixel-accurate furniture outlines for the Decision screen.
+"""Pixel-accurate furniture outlines for the Decision screen (YOLOE + SAM 2).
 
 GPT decides *which* furniture was added by comparing the original and
 generated room.  YOLOE then does the spatial job it is designed for: detect
@@ -25,6 +25,10 @@ BACKEND_DIR = Path(__file__).resolve().parents[2]
 MODEL_DIR = BACKEND_DIR / "models"
 MODEL_PATH = MODEL_DIR / "yoloe-26n-seg.pt"
 PROMPT_PROFILE_PATH = MODEL_DIR / "roomly-furniture-prompts.npz"
+SAM_MODEL_PATH = MODEL_DIR / "sam2.1_t.pt"
+# SAM 2 only replaces a YOLOE outline when it still covers roughly the same
+# object; otherwise its result is treated as a bad segmentation and ignored.
+SAM_MIN_AGREEMENT = 0.55
 
 # Multiple visual names improve open-vocabulary recall.  All aliases map back
 # to one stable Roomly category so GPT's semantic object can be paired with the
@@ -104,6 +108,68 @@ def _get_model() -> tuple[Any, str]:
 
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
     return model, device
+
+
+@lru_cache(maxsize=1)
+def _get_sam() -> Any:
+    """Load SAM 2 (tiny) once; used to tighten YOLOE outlines with box prompts."""
+
+    from ultralytics import SAM
+    from ultralytics.utils.downloads import attempt_download_asset
+
+    MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    with _working_directory(MODEL_DIR):
+        checkpoint = attempt_download_asset(SAM_MODEL_PATH)
+        return SAM(checkpoint)
+
+
+def _refine_with_sam(image: np.ndarray, matched: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Re-cut each matched object's edge with SAM 2, prompted by its YOLOE box.
+
+    YOLOE decides *which* pixels-region is the object; SAM 2 traces the edge
+    precisely. Any failure or disagreement keeps the original YOLOE outline.
+    """
+
+    if not matched or os.environ.get("ROOMLY_DISABLE_SAM2") == "1":
+        return matched
+
+    try:
+        with _MODEL_LOCK:
+            sam = _get_sam()
+            height, width = image.shape[:2]
+            refined_items: list[dict[str, Any]] = []
+            for item in matched:
+                refined_outlines: list[list[list[float]]] = []
+                for outline in item.get("outlines") or [item["outline"]]:
+                    x1, y1, x2, y2 = _outline_bounds(outline)
+                    box = [x1 / 100 * width, y1 / 100 * height, x2 / 100 * width, y2 / 100 * height]
+                    result = sam.predict(image, bboxes=[box], verbose=False)[0]
+                    refined = None
+                    if result.masks is not None and len(result.masks.data):
+                        refined = _outline_from_mask_bitmap(result.masks.data[0].cpu().numpy())
+                    if refined is not None and _outline_iou(refined, outline) >= SAM_MIN_AGREEMENT:
+                        refined_outlines.append(refined)
+                    else:
+                        refined_outlines.append(outline)
+
+                xs = [point[0] for shape in refined_outlines for point in shape]
+                ys = [point[1] for shape in refined_outlines for point in shape]
+                updated = dict(item)
+                updated.update(
+                    outline=refined_outlines[0],
+                    outlines=refined_outlines,
+                    box_x_min=round(min(xs), 2),
+                    box_x_max=round(max(xs), 2),
+                    box_y_min=round(min(ys), 2),
+                    box_y_max=round(max(ys), 2),
+                    x=round(sum(xs) / len(xs), 2),
+                    y=round(sum(ys) / len(ys), 2),
+                    segmenter="yoloe+sam2",
+                )
+                refined_items.append(updated)
+            return refined_items
+    except Exception:  # noqa: BLE001 — SAM 2 is an enhancement; never break detection
+        return matched
 
 
 def _canonical_object_key(item: dict[str, Any]) -> str | None:
@@ -424,4 +490,4 @@ def segment_detected_objects(
             }
         )
 
-    return _match_detections_with_fallback(semantic_objects, detections)
+    return _refine_with_sam(image, _match_detections_with_fallback(semantic_objects, detections))

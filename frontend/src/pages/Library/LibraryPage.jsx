@@ -35,6 +35,7 @@ const STATUS_LABELS = {
   'ai-generate': 'กำลัง Generate',
   result: 'ดูผลลัพธ์',
   'object-decision': 'กำลังตัดสินใจ',
+  summary: 'สรุปผล',
   'product-matching': 'เลือกสินค้า',
   saved: 'บันทึกแล้ว',
 }
@@ -64,6 +65,7 @@ function LibraryPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [openMenuId, setOpenMenuId] = useState(null)
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
+  const [deletingProject, setDeletingProject] = useState(null)
   const budgetFormatter = new Intl.NumberFormat('th-TH')
   const currentUser = getCurrentUser()
   const displayName = currentUser?.name || currentUser?.email || 'ผู้ใช้งาน'
@@ -88,11 +90,17 @@ function LibraryPage() {
     navigate('/login')
   }
 
-  async function handleDelete(event, project) {
+  function handleDelete(event, project) {
     event.preventDefault()
     event.stopPropagation()
     setOpenMenuId(null)
-    if (!window.confirm(`ลบโปรเจกต์ “${project.name}” ใช่หรือไม่?`)) return
+    setDeletingProject(project)
+  }
+
+  async function confirmDelete() {
+    const project = deletingProject
+    if (!project) return
+    setDeletingProject(null)
     await deleteProjectImages(project.id).catch(() => {})
     await removeProject(project.id)
     setProjects(await getProjects())
@@ -214,6 +222,19 @@ function LibraryPage() {
           </div>
         )}
       </main>
+
+      {deletingProject ? (
+        <div className="detail-modal-backdrop" onClick={() => setDeletingProject(null)}>
+          <div className="detail-modal" onClick={(event) => event.stopPropagation()}>
+            <strong>ลบโปรเจกต์นี้?</strong>
+            <p>“{deletingProject.name}” จะถูกลบออกจากคลังอย่างถาวร</p>
+            <div className="detail-modal-actions">
+              <button type="button" onClick={() => setDeletingProject(null)}>ยกเลิก</button>
+              <button type="button" className="is-danger" onClick={confirmDelete}>ลบโปรเจกต์</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

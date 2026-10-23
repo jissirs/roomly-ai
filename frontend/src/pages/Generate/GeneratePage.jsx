@@ -6,7 +6,7 @@ import { api, ApiError } from '../../lib/api'
 import { planProducts, toGenerateProducts, toPlannedRecord } from '../../lib/productPlan'
 import './GeneratePage.css'
 
-const COMPLETED_GENERATION_STAGES = new Set(['result', 'object-decision', 'product-matching', 'saved'])
+const COMPLETED_GENERATION_STAGES = new Set(['result', 'object-decision', 'summary', 'product-matching', 'saved'])
 
 function BeforeAfterCompare({ before, after, roomNumber }) {
   const [position, setPosition] = useState(50)

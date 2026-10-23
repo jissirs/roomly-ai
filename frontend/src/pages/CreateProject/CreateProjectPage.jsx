@@ -58,6 +58,8 @@ async function fileToAnalysisDataUrl(file) {
   return canvas.toDataURL('image/jpeg', 0.82)
 }
 
+const MAX_ROOM_IMAGES = 6
+
 const REQUIREMENTS = [
   'เพิ่มพื้นที่จัดเก็บ',
   'มีมุมทำงาน',
@@ -116,6 +118,7 @@ function CreateProjectPage() {
   const [styleAnalysisError, setStyleAnalysisError] = useState('')
   const [isAnalyzingStyles, setIsAnalyzingStyles] = useState(false)
   const [styleShuffleRound, setStyleShuffleRound] = useState(0)
+  const [imageLimitNotice, setImageLimitNotice] = useState('')
 
   useEffect(() => {
     if (!id) return
@@ -195,19 +198,26 @@ function CreateProjectPage() {
     )
     if (!validFiles.length) return
 
-    const newImages = validFiles.map((file) => {
-      const url = URL.createObjectURL(file)
-      imageUrlsRef.current.push(url)
-      return {
-        id: globalThis.crypto?.randomUUID?.() ?? `${file.name}-${file.lastModified}`,
-        file,
-        url,
-      }
+    setRoomImages((current) => {
+      const remainingSlots = MAX_ROOM_IMAGES - current.length
+      setImageLimitNotice(remainingSlots < validFiles.length ? `อัปโหลดได้สูงสุด ${MAX_ROOM_IMAGES} ภาพต่อโปรเจกต์` : '')
+      if (remainingSlots <= 0) return current
+
+      const newImages = validFiles.slice(0, remainingSlots).map((file) => {
+        const url = URL.createObjectURL(file)
+        imageUrlsRef.current.push(url)
+        return {
+          id: globalThis.crypto?.randomUUID?.() ?? `${file.name}-${file.lastModified}`,
+          file,
+          url,
+        }
+      })
+      return [...current, ...newImages]
     })
-    setRoomImages((current) => [...current, ...newImages])
   }
 
   function removeImage(id) {
+    setImageLimitNotice('')
     setRoomImages((current) => {
       const image = current.find((item) => item.id === id)
       if (image) {
@@ -362,22 +372,28 @@ function CreateProjectPage() {
             <section className={`project-section ${activeStep === 0 ? '' : 'is-hidden'}`}>
               <div className="project-section-heading">
                 <span>01</span>
-                <div><h2>อัปโหลดภาพห้องเปล่า</h2><p>เพิ่มได้หลายห้อง เลือกหลายไฟล์พร้อมกัน หรือกลับมาเพิ่มทีละภาพก็ได้</p></div>
+                <div><h2>อัปโหลดภาพห้องเปล่า</h2><p>เพิ่มได้หลายห้อง เลือกหลายไฟล์พร้อมกัน หรือกลับมาเพิ่มทีละภาพก็ได้ (สูงสุด {MAX_ROOM_IMAGES} ภาพ)</p></div>
               </div>
 
               <label
-                className={`project-dropzone ${roomImages.length ? 'has-images' : ''}`.trim()}
+                className={`project-dropzone ${roomImages.length ? 'has-images' : ''} ${roomImages.length >= MAX_ROOM_IMAGES ? 'is-disabled' : ''}`.trim()}
                 htmlFor="project-room-image"
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={(event) => {
                   event.preventDefault()
+                  if (roomImages.length >= MAX_ROOM_IMAGES) return
                   selectFiles(event.dataTransfer.files)
                 }}
               >
-                {roomImages.length ? (
+                {roomImages.length >= MAX_ROOM_IMAGES ? (
+                  <div className="project-upload-summary">
+                    <span className="project-upload-icon"><Icon name="image" size={25} /></span>
+                    <div><strong>ครบจำนวนสูงสุดแล้ว</strong><small>อัปโหลดได้สูงสุด {MAX_ROOM_IMAGES} ภาพต่อโปรเจกต์ · ลบภาพเดิมเพื่อเพิ่มใหม่</small></div>
+                  </div>
+                ) : roomImages.length ? (
                   <div className="project-upload-summary">
                     <span className="project-upload-icon"><Icon name="upload" size={25} /></span>
-                    <div><strong>เพิ่มภาพห้องอีก</strong><small>เลือกหลายไฟล์ได้ · ขณะนี้มี {roomImages.length} ห้อง</small></div>
+                    <div><strong>เพิ่มภาพห้องอีก</strong><small>ขณะนี้มี {roomImages.length}/{MAX_ROOM_IMAGES} ห้อง</small></div>
                     <span className="project-upload-cta">เพิ่มภาพ</span>
                   </div>
                 ) : existingProject?.hasRoomImage ? (
@@ -391,7 +407,7 @@ function CreateProjectPage() {
                   <>
                     <span className="project-upload-icon"><Icon name="upload" size={25} /></span>
                     <strong>ลากภาพมาวาง หรือคลิกเพื่อเลือกไฟล์</strong>
-                    <small>เลือกหลายไฟล์ได้ · รองรับ JPG, PNG หรือ WEBP ไม่เกิน 10 MB ต่อภาพ</small>
+                    <small>เลือกหลายไฟล์ได้ · รองรับ JPG, PNG หรือ WEBP ไม่เกิน 10 MB ต่อภาพ (สูงสุด {MAX_ROOM_IMAGES} ภาพ)</small>
                     <span className="project-upload-cta">เลือกภาพห้องเปล่า</span>
                   </>
                 )}
@@ -402,11 +418,13 @@ function CreateProjectPage() {
                 accept="image/jpeg,image/png,image/webp"
                 multiple
                 hidden
+                disabled={roomImages.length >= MAX_ROOM_IMAGES}
                 onChange={(event) => {
                   selectFiles(event.target.files)
                   event.target.value = ''
                 }}
               />
+              {imageLimitNotice ? <p className="project-upload-notice">{imageLimitNotice}</p> : null}
 
               {roomImages.length ? (
                 <div className="project-image-grid" aria-label={`ภาพห้องที่เลือก ${roomImages.length} ภาพ`}>
@@ -535,11 +553,6 @@ function CreateProjectPage() {
                   </label>
                 ))}
               </div>
-
-              <label className="project-textarea-field">
-                <span>รายละเอียดอื่น ๆ <small>(ไม่บังคับ)</small></span>
-                <textarea rows="4" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="เช่น อยากเก็บโต๊ะทำงานเดิม ต้องการทางเดินกว้าง หรือมีสีที่ไม่ต้องการ" />
-              </label>
 
               <div className="project-review-card">
                 <div className="project-review-heading"><span>PROJECT SUMMARY</span><strong>{projectName || 'ยังไม่ได้ตั้งชื่อโปรเจกต์'}</strong></div>
