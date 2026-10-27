@@ -104,8 +104,9 @@ function LibraryPage() {
     setDeletingProject(null)
     setDeleteError('')
     try {
+      // Files first: storage policies only let the owner delete while the project row still exists.
+      await deleteProjectImages(project.id)
       await removeProject(project.id)
-      await deleteProjectImages(project.id).catch(() => {})
     } catch (error) {
       setDeleteError(error.message || 'ลบโปรเจกต์ไม่สำเร็จ กรุณาลองใหม่')
     }

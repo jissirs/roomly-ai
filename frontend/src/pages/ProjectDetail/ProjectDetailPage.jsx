@@ -124,9 +124,9 @@ function ProjectDetailPage() {
     setIsDeleting(true)
     setDeleteError('')
     try {
-      // The project row goes first: leftover files are harmless, a leftover row pointing at deleted files is not.
+      // Files first: storage policies only let the owner delete while the project row still exists.
+      await deleteProjectImages(project.id)
       await removeProject(project.id)
-      await deleteProjectImages(project.id).catch(() => {})
       navigate('/home')
     } catch (error) {
       setDeleteError(error.message || 'ลบโปรเจกต์ไม่สำเร็จ กรุณาลองใหม่')

@@ -146,3 +146,36 @@ create policy "Users manage their own checkpoints"
 -- the "ดูสินค้าจริง" button uses it instead of the plain store URL.
 alter table public.products add column if not exists affiliate_url text;
 alter table public.products add column if not exists price_checked_at timestamptz;
+
+-- AI usage limits (used by the `api` Edge Function): counts paid AI calls per user.
+create table if not exists public.ai_usage (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  used_at timestamptz not null default now()
+);
+create index if not exists ai_usage_user_time_idx on public.ai_usage (user_id, used_at desc);
+alter table public.ai_usage enable row level security;  -- no policies: only the function below touches it
+
+create or replace function public.consume_ai_quota(p_per_minute int, p_per_day int)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  uid uuid := auth.uid();
+  day_count int;
+  minute_count int;
+begin
+  if uid is null then return 'unauthenticated'; end if;
+  delete from public.ai_usage where user_id = uid and used_at < now() - interval '1 day';
+  select count(*) into day_count from public.ai_usage where user_id = uid;
+  if day_count >= p_per_day then return 'day'; end if;
+  select count(*) into minute_count from public.ai_usage where user_id = uid and used_at > now() - interval '1 minute';
+  if minute_count >= p_per_minute then return 'minute'; end if;
+  insert into public.ai_usage (user_id) values (uid);
+  return 'ok';
+end;
+$$;
+
+revoke all on function public.consume_ai_quota(int, int) from public, anon;
+grant execute on function public.consume_ai_quota(int, int) to authenticated;

@@ -474,6 +474,8 @@ function DecisionPage() {
   const drawnObjects = visibleObjects.filter((item) => !item.removedFromImage)
   const countedObjects = objects.filter((item) => decisions[item.id] !== 'remove')
   const estimatedCount = countedObjects.filter((item) => !item.realProduct).length
+  // Marked Remove for the budget, but still visible in the AI picture.
+  const pendingRemovals = objects.filter((item) => decisions[item.id] === 'remove' && !item.removedFromImage).length
 
   function chooseDecision(decision) {
     if (activeObject.removedFromImage && decision !== 'remove') return
@@ -824,7 +826,7 @@ function DecisionPage() {
 
         <footer className="decision-footer">
           <div><span>ยอดประมาณการใหม่</span><strong>฿{new Intl.NumberFormat('th-TH').format(total)}</strong><small className={total > project.budget ? 'is-over' : ''}>{total <= project.budget ? `เหลืองบ ฿${new Intl.NumberFormat('th-TH').format(project.budget - total)}` : `เกินงบ ฿${new Intl.NumberFormat('th-TH').format(total - project.budget)}`}</small>{estimatedCount > 0 ? <small className="decision-price-mix">รวมราคาที่ AI ประมาณการ {estimatedCount} ชิ้น</small> : null}</div>
-          <p className={isOverBudget || saveError ? 'is-over' : ''} role={saveError ? 'alert' : undefined}>{saveError ? saveError : isOverBudget ? <>ต้องลดอีก <b>฿{new Intl.NumberFormat('th-TH').format(total - project.budget)}</b> ก่อนดำเนินการต่อ</> : <><b>{decisionCounts.replace}</b> รายการรอหาสินค้าทดแทน · <b>{decisionCounts.remove}</b> รายการจะถูกนำออก</>}</p>
+          <p className={isOverBudget || saveError ? 'is-over' : ''} role={saveError ? 'alert' : undefined}>{saveError ? saveError : isOverBudget ? <>ต้องลดอีก <b>฿{new Intl.NumberFormat('th-TH').format(total - project.budget)}</b> ก่อนดำเนินการต่อ</> : <><b>{decisionCounts.replace}</b> รายการรอหาสินค้าทดแทน · <b>{decisionCounts.remove}</b> รายการจะถูกนำออก{pendingRemovals ? <> · <b>{pendingRemovals}</b> ชิ้นยังอยู่ในภาพ AI (เลือกชิ้นนั้นแล้วกด “ลบเฉพาะชิ้นนี้ออกจากภาพ” ถ้าต้องการให้หายจากภาพ)</> : null}</>}</p>
           <button type="button" disabled={isOverBudget || isRegenerating || isSaving || isSyncing} onClick={continueToProducts}>{isOverBudget ? 'ยอดรวมยังเกินงบ' : isRegenerating ? 'รอ AI สร้างภาพให้เสร็จ' : isSaving ? 'กำลังบันทึก...' : 'ยืนยันและไปดูสรุป'} <span>{isOverBudget ? '!' : '→'}</span></button>
         </footer>
       </main>
