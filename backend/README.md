@@ -1,6 +1,6 @@
 # Roomly AI — AI Service (Python, self-hosted)
 
-> ตอนนี้เว็บใช้ Edge Function `api` บน Supabase (`../supabase/functions/api`) เป็น backend หลัก โฟลเดอร์นี้เป็นทางเลือกแบบ self-host ที่ให้เส้นขอบวัตถุแม่นยำกว่า (YOLOE + SAM 2) ใช้ได้โดยตั้ง `VITE_API_BASE_URL` ของ frontend ให้ชี้มาที่ `http://<host>/api/v1`
+> โฟลเดอร์นี้คือ AI backend แบบ self-host ที่ให้เส้นขอบวัตถุแม่นยำ (YOLOE + SAM 2) ส่วนเวอร์ชันที่ deploy อยู่ตอนนี้ใช้ Supabase Edge Function ชื่อ `api` ที่ไม่ได้เก็บใน repo นี้ จะใช้ตัวนี้แทนได้โดยตั้ง `VITE_API_BASE_URL` ของ frontend ให้ชี้มาที่ `http://<host>/api/v1`
 
 FastAPI service ที่ทำหน้าที่เดียว: เรียก OpenAI และโมเดลตัดภาพในส่วนที่ต้องใช้ secret key ฝั่งเซิร์ฟเวอร์ ส่วนที่เหลือ (auth, ตาราง `projects`, ภาพ, แคตตาล็อกสินค้า) อยู่ใน Supabase และถูกเรียกจาก frontend โดยตรง service นี้ไม่มีฐานข้อมูลของตัวเอง
 
