@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class RoomDimensions(BaseModel):
@@ -72,6 +72,9 @@ class DetectObjectsResponse(BaseModel):
 
 class RegenerateObjectRequest(BaseModel):
     image_url: str
+    # A real catalog product to put in the picture exactly as it looks in the store.
+    product_name: str | None = Field(default=None, max_length=200)
+    product_image_url: str | None = Field(default=None, max_length=500)
     object_name: str
     category: str
     outlines: list[list[list[float]]]

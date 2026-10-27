@@ -1,44 +1,23 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import AuthShell from '../../components/AuthShell/AuthShell'
-import { api } from '../../lib/api'
+import { requestPasswordReset } from '../../lib/auth'
 
 function ForgotPasswordPage() {
-  const [step, setStep] = useState('email')
   const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState('')
+  const [isSent, setIsSent] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  async function handleCheckEmail(event) {
+  async function handleSubmit(event) {
     event.preventDefault()
     setError('')
     setIsSubmitting(true)
     try {
-      const { exists } = await api.post('/auth/forgot/check', { email: email.trim() })
-      if (exists) setStep('reset')
-      else setError('ไม่พบอีเมลนี้ในระบบ')
+      await requestPasswordReset(email.trim())
+      setIsSent(true)
     } catch (err) {
-      setError(err.message || 'ตรวจสอบอีเมลไม่สำเร็จ กรุณาลองใหม่')
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
-
-  async function handleReset(event) {
-    event.preventDefault()
-    setError('')
-    if (password !== confirmPassword) {
-      setError('รหัสผ่านทั้งสองช่องไม่ตรงกัน')
-      return
-    }
-    setIsSubmitting(true)
-    try {
-      await api.post('/auth/forgot/reset', { email: email.trim(), new_password: password })
-      setStep('done')
-    } catch (err) {
-      setError(err.message || 'ตั้งรหัสผ่านไม่สำเร็จ กรุณาลองใหม่')
+      setError(err.message || 'ส่งลิงก์ไม่สำเร็จ กรุณาลองใหม่')
     } finally {
       setIsSubmitting(false)
     }
@@ -48,55 +27,20 @@ function ForgotPasswordPage() {
     <AuthShell
       eyebrow="Account recovery"
       title="ลืมรหัสผ่าน?"
-      description={step === 'reset' ? `ตั้งรหัสผ่านใหม่สำหรับ ${email.trim()}` : 'กรอกอีเมลที่ใช้สมัคร ถ้ามีในระบบจะตั้งรหัสผ่านใหม่ได้ทันที'}
+      description="กรอกอีเมลที่ใช้สมัคร เราจะส่งลิงก์สำหรับตั้งรหัสผ่านใหม่ให้ทางอีเมล"
       footer={
         <>
           จำรหัสผ่านได้แล้ว?<Link to="/login">กลับไปเข้าสู่ระบบ</Link>
         </>
       }
     >
-      {step === 'done' ? (
+      {isSent ? (
         <div className="auth-success" role="status">
-          <strong>ตั้งรหัสผ่านใหม่เรียบร้อย</strong>
-          <Link to="/login">ไปเข้าสู่ระบบด้วยรหัสผ่านใหม่</Link>
+          <strong>ส่งลิงก์ตั้งรหัสผ่านใหม่แล้ว</strong>
+          <p>ถ้าอีเมล {email.trim()} มีบัญชีในระบบ คุณจะได้รับอีเมลภายในไม่กี่นาที (ตรวจโฟลเดอร์สแปมด้วย)</p>
         </div>
-      ) : step === 'reset' ? (
-        <form className="auth-form" onSubmit={handleReset}>
-          <div className="auth-field">
-            <label htmlFor="forgot-new-password">รหัสผ่านใหม่</label>
-            <input
-              className="auth-input"
-              id="forgot-new-password"
-              type="password"
-              autoComplete="new-password"
-              minLength="8"
-              placeholder="อย่างน้อย 8 ตัวอักษร"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-            />
-          </div>
-          <div className="auth-field">
-            <label htmlFor="forgot-confirm-password">ยืนยันรหัสผ่านใหม่</label>
-            <input
-              className="auth-input"
-              id="forgot-confirm-password"
-              type="password"
-              autoComplete="new-password"
-              minLength="8"
-              placeholder="กรอกรหัสผ่านอีกครั้ง"
-              value={confirmPassword}
-              onChange={(event) => setConfirmPassword(event.target.value)}
-              required
-            />
-          </div>
-          {error ? <p className="auth-field-error" role="alert">{error}</p> : null}
-          <button className="auth-submit" type="submit" disabled={isSubmitting}>
-            {isSubmitting ? 'กำลังบันทึก...' : 'ตั้งรหัสผ่านใหม่'}
-          </button>
-        </form>
       ) : (
-        <form className="auth-form" onSubmit={handleCheckEmail}>
+        <form className="auth-form" onSubmit={handleSubmit}>
           <div className="auth-field">
             <label htmlFor="forgot-email">อีเมล</label>
             <input
@@ -113,7 +57,7 @@ function ForgotPasswordPage() {
           </div>
           {error ? <p className="auth-field-error" role="alert">{error}</p> : null}
           <button className="auth-submit" type="submit" disabled={isSubmitting}>
-            {isSubmitting ? 'กำลังตรวจสอบ...' : 'ตรวจสอบอีเมล'}
+            {isSubmitting ? 'กำลังส่ง...' : 'ส่งลิงก์ตั้งรหัสผ่านใหม่'}
           </button>
         </form>
       )}

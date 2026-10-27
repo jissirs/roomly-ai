@@ -64,6 +64,7 @@ function LibraryPage() {
   const [projects, setProjects] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [openMenuId, setOpenMenuId] = useState(null)
+  const [deleteError, setDeleteError] = useState('')
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
   const [deletingProject, setDeletingProject] = useState(null)
   const budgetFormatter = new Intl.NumberFormat('th-TH')
@@ -101,8 +102,13 @@ function LibraryPage() {
     const project = deletingProject
     if (!project) return
     setDeletingProject(null)
-    await deleteProjectImages(project.id).catch(() => {})
-    await removeProject(project.id)
+    setDeleteError('')
+    try {
+      await removeProject(project.id)
+      await deleteProjectImages(project.id).catch(() => {})
+    } catch (error) {
+      setDeleteError(error.message || 'ลบโปรเจกต์ไม่สำเร็จ กรุณาลองใหม่')
+    }
     setProjects(await getProjects())
   }
 
@@ -146,6 +152,7 @@ function LibraryPage() {
       </header>
 
       <main className="library-content">
+        {deleteError ? <p className="library-error" role="alert">{deleteError}</p> : null}
         <div className="library-heading">
           <div>
             <p className="library-eyebrow">คลังโปรเจกต์</p>
@@ -173,7 +180,7 @@ function LibraryPage() {
             {projects.map((project) => (
               <Link className="library-card" to={`/project/${project.id}`} key={project.id}>
                 <div className="library-card-thumb">
-                  <Icon name="room" size={28} />
+                  {project.generatedImageUrl ? <img src={project.generatedImageUrl} alt={`ภาพ AI ของ ${project.name}`} loading="lazy" /> : <Icon name="room" size={28} />}
                   <span className={`library-status is-${project.stage ?? project.status}`}>
                     {STATUS_LABELS[project.stage ?? project.status] ?? project.stage ?? project.status}
                   </span>

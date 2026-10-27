@@ -17,12 +17,21 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=str(BACKEND_DIR / ".env"), env_file_encoding="utf-8", extra="ignore")
 
+    # "production" hides the interactive API docs and refuses unsafe settings at startup.
+    environment: str = "development"
+
+    # Maintenance kill switch: AI_ENABLED=false makes every AI route answer 503.
+    ai_enabled: bool = True
+
+    # Per-user ceilings on AI calls (each one costs OpenAI money). In-memory,
+    # so they are per server process — run one worker or move them to Redis.
+    ai_requests_per_minute: int = 10
+    ai_requests_per_day: int = 200
+
     cors_origins: str = "http://localhost:5173,http://localhost:5190"
 
     supabase_url: str = ""
     supabase_publishable_key: str = ""
-    # Server-only admin key, used by the no-email password reset (api/v1/auth.py).
-    supabase_service_role_key: str = ""
 
     # gpt-4o-mini: cheapest OpenAI model that still reads images and does
     # text reasoning. gpt-image-1: supports images.edit, so it redesigns the
@@ -38,9 +47,13 @@ class Settings(BaseSettings):
     # cost of the full gpt-4o here since a wildly misplaced box is worse
     # than a slightly pricier one that actually lands on the object.
     openai_detection_model: str = "gpt-4o"
-    openai_image_model: str = "gpt-image-1"
+    openai_image_model: str = "gpt-image-1.5"
     openai_image_size: str = "1024x1024"
     openai_image_quality: str = "low"
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment.lower() == "production"
 
     @property
     def cors_origin_list(self) -> list[str]:

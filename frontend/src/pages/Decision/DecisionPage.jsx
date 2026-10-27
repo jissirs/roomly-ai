@@ -1,23 +1,44 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { getObjectDecisions, getProject, getRoomDesigns, updateProject, withWorkflowData } from '../../lib/projects'
+import { getObjectDecisions, getProject, getRoomDesigns, getWorkflowData, updateProject, withWorkflowData } from '../../lib/projects'
 import { getProjectImages } from '../../lib/imageStore'
 import { api } from '../../lib/api'
+import { fitFrameStyle, naturalRatio } from '../../lib/imageLayout'
+import { appendRoomSize } from '../../lib/productPlan'
+import { fetchLivePrices } from '../../lib/livePrices'
 import { REAL_PRODUCT_CATALOG } from '../../data/realProductCatalog'
 import decisionRoom from '../../assets/steps/ai-decisions.png'
 import './DecisionPage.css'
 import './DecisionOverlay.css'
 
-// Fallback shown only if there's no room photo yet, or AI detection fails.
-// `outline` points are hand-tuned to loosely hug each demo item's silhouette
-// (not a plain rectangle) so the fallback looks like the real AI response.
-const DEMO_OBJECTS = [
-  { id: 'sofa', name: 'โซฟา 3 ที่นั่ง', category: 'Sofa', price: 2790, x: 58, y: 56, outline: [[33, 71], [33, 50], [45, 41], [71, 41], [83, 50], [83, 71]] },
-  { id: 'table', name: 'โต๊ะกลางทรงกลม', category: 'Coffee table', price: 1290, x: 55, y: 76, outline: [[47, 64], [63, 64], [70, 72], [70, 80], [63, 88], [47, 88], [40, 80], [40, 72]] },
-  { id: 'chair', name: 'เก้าอี้ไม้สาน', category: 'Armchair', price: 1790, x: 17, y: 61, outline: [[10, 44], [24, 44], [31, 55], [31, 68], [24, 78], [10, 78], [3, 68], [3, 55]] },
-  { id: 'plant', name: 'ต้นไม้ตกแต่ง', category: 'Decoration', price: 590, x: 84, y: 35, outline: [[84, 15], [90, 22], [94, 35], [90, 48], [84, 55], [78, 48], [74, 35], [78, 22]] },
-  { id: 'pouf', name: 'เบาะนั่ง Pouffe', category: 'Pouffe', price: 790, x: 20, y: 82, outline: [[14, 70], [26, 70], [32, 82], [26, 94], [14, 94], [8, 82]] },
-]
+const ACTION_LABELS = { remove: 'ลบ', replace: 'เปลี่ยน' }
+
+// What the picture currently shows for an object: the action of the latest
+// AI edit on it that is still applied (derived from the saved history, so it
+// survives a reload).
+function lastAppliedAction(room, objectId) {
+  return [...(room?.history ?? [])].reverse().find((entry) => entry.objectId === objectId)?.action ?? null
+}
+
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`
+  if (value && typeof value === 'object') return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(',')}}`
+  return JSON.stringify(value) ?? 'null'
+}
+
+// What "the saved choices" mean for change detection: the decisions plus the
+// briefs of objects that are actually set to REPLACE (a leftover brief of an
+// object switched back to KEEP is not a change).
+function choicesSnapshot(decisionMap, briefs) {
+  const replaceBriefs = Object.fromEntries(Object.entries(briefs ?? {}).filter(([objectId]) => decisionMap[objectId] === 'replace'))
+  return stableJson([decisionMap, replaceBriefs])
+}
+
+function priceOfObject(item, livePrices) {
+  const productId = item.shownProductId ?? item.realProduct?.productId
+  if (!productId) return item.price
+  return livePrices[productId]?.price ?? (item.shownProductId ? REAL_PRODUCT_CATALOG.find((product) => product.id === productId)?.price : null) ?? item.price
+}
 
 const DECISIONS = [
   { id: 'keep', label: 'KEEP', detail: 'เก็บชิ้นนี้ไว้ในแบบ', icon: '✓' },
@@ -53,15 +74,20 @@ function normalizeCategory(value) {
 // Attaches the real catalog product (and its real scraped price) that was
 // actually placed in the AI-generated image for this item's category, so
 // the Decision page shows a real price instead of GPT's rough guess.
-function withRealPrice(item, plannedByCategory, catalogById) {
+function withRealPrice(item, plannedByCategory, catalogById, used) {
+  if (item.realProduct?.productId) {
+    used?.add(item.realProduct.productId)
+    return item
+  }
   const planned = plannedByCategory[normalizeCategory(item.category)] ?? plannedByCategory[normalizeCategory(item.id)]
-  if (!planned) return item
+  if (!planned || used?.has(planned.productId)) return item
+  used?.add(planned.productId)
   const product = catalogById[planned.productId]
   if (!product) return { ...item, price: planned.price }
   return {
     ...item,
     price: planned.price,
-    realProduct: { name: product.name, store: product.store, url: product.url, price: product.price },
+    realProduct: { productId: planned.productId, name: product.name, store: product.store, url: product.url, price: product.price },
   }
 }
 
@@ -131,27 +157,113 @@ function DecisionPage() {
   const [roomDesigns, setRoomDesigns] = useState([])
   const [activeRoomId, setActiveRoomId] = useState('')
   const [objects, setObjects] = useState([])
-  const [isRealDetection, setIsRealDetection] = useState(false)
   const [isDetecting, setIsDetecting] = useState(true)
   const [detectError, setDetectError] = useState('')
   const [activeId, setActiveId] = useState('')
-  const [decisions, setDecisions] = useState({})
+  const [rawDecisions, setDecisions] = useState({})
   const [replacementBriefs, setReplacementBriefs] = useState({})
   const [aiSuggestions, setAiSuggestions] = useState(null)
   const [aiError, setAiError] = useState('')
   const [isRegenerating, setIsRegenerating] = useState(false)
+  const [imageRatio, setImageRatio] = useState(null)
   const [regenerateError, setRegenerateError] = useState('')
+  const [isScoring, setIsScoring] = useState(false)
+  const [isSyncing, setIsSyncing] = useState(false)
+  const [livePrices, setLivePrices] = useState({})
+  const [syncProgress, setSyncProgress] = useState(null)
+  const [syncError, setSyncError] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
+  const [autoSaveStatus, setAutoSaveStatus] = useState('idle')
+  const dirtyRef = useRef(false)
+  const baselineRef = useRef('')
+  const savingRef = useRef(false)
+  const changeVersion = useRef(0)
+  const autoSaveTimer = useRef(null)
+  const latestRef = useRef({})
 
   const activeObjectBase = objects.find((item) => item.id === activeId) ?? objects[0]
   const aiSuggestion = aiSuggestions?.[activeObjectBase?.id]
   const activeObject = activeObjectBase
     ? { ...DEFAULT_SCORES, ...activeObjectBase, ...(aiSuggestion ?? {}) }
     : null
+  // An object the AI already removed from the picture always counts as REMOVE.
+  const decisions = useMemo(() => {
+    const removed = objects.filter((item) => item.removedFromImage)
+    return removed.length ? { ...rawDecisions, ...Object.fromEntries(removed.map((item) => [item.id, 'remove'])) } : rawDecisions
+  }, [rawDecisions, objects])
+  // The real product tied to an object (the one it was generated from, or the
+  // one put into the picture later): its live store price beats the saved one.
+  const priceOf = (item) => priceOfObject(item, livePrices)
   const total = useMemo(() => objects.reduce((sum, item) => {
     if (decisions[item.id] === 'remove') return sum
-    if (decisions[item.id] === 'replace') return sum + (Number(replacementBriefs[item.id]?.budget) || item.price)
-    return sum + item.price
-  }, 0), [objects, decisions, replacementBriefs])
+    if (decisions[item.id] === 'replace') return sum + (Number(replacementBriefs[item.id]?.budget) || priceOfObject(item, livePrices))
+    return sum + priceOfObject(item, livePrices)
+  }, 0), [objects, decisions, replacementBriefs, livePrices])
+
+  useEffect(() => {
+    latestRef.current = { project, decisions, replacementBriefs, objects, roomDesigns, total }
+  })
+
+  // Saves the user's Keep/Replace/Remove choices (and replacement briefs) without
+  // them having to press a button.
+  function buildDecisions(baseProject, decisionState, briefs, patch) {
+    return withWorkflowData(
+      { ...decisionState, __replacementBriefs: briefs, __workflow: getWorkflowData(baseProject?.decisions) },
+      patch,
+    )
+  }
+
+  async function persistDecisions() {
+    const latest = latestRef.current
+    if (!latest.project || !dirtyRef.current) return true
+    if (!latest.roomDesigns.length) return true
+    const version = changeVersion.current
+    const snapshot = choicesSnapshot(latest.decisions, latest.replacementBriefs)
+    if (snapshot === baselineRef.current) {
+      if (version === changeVersion.current) dirtyRef.current = false
+      setAutoSaveStatus('idle')
+      return true
+    }
+    setAutoSaveStatus('saving')
+    try {
+      const reopen = ['summary', 'product-matching', 'saved'].includes(latest.project.stage)
+      const updated = await updateProject(latest.project.id, {
+        decisions: buildDecisions(latest.project, latest.decisions, latest.replacementBriefs, { generatedImages: latest.roomDesigns, detectedObjects: latest.objects }),
+        estimatedTotal: latest.total,
+        ...(reopen ? { stage: 'object-decision', status: 'in-progress', progress: 67 } : {}),
+      })
+      baselineRef.current = snapshot
+      if (version === changeVersion.current) dirtyRef.current = false
+      setProject(updated)
+      setAutoSaveStatus('saved')
+      return true
+    } catch {
+      setAutoSaveStatus('error')
+      return false
+    }
+  }
+
+  useEffect(() => {
+    if (!dirtyRef.current) return undefined
+    setAutoSaveStatus('pending')
+    autoSaveTimer.current = setTimeout(() => { persistDecisions() }, 600)
+    return () => clearTimeout(autoSaveTimer.current)
+  }, [decisions, replacementBriefs])
+
+  const liveProductIds = [...new Set(objects.flatMap((item) => [item.realProduct?.productId, item.shownProductId]).filter(Boolean))].join(',')
+  useEffect(() => {
+    const products = liveProductIds.split(',').filter(Boolean).map((productId) => REAL_PRODUCT_CATALOG.find((product) => product.id === productId)).filter(Boolean)
+    if (!products.length) return
+    fetchLivePrices(products).then((result) => setLivePrices((current) => ({ ...current, ...result })))
+  }, [liveProductIds])
+
+  useEffect(() => {
+    if (!['pending', 'saving', 'error'].includes(autoSaveStatus)) return undefined
+    const warn = (event) => { event.preventDefault() }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [autoSaveStatus])
 
   const decisionCounts = useMemo(() => objects.reduce((counts, item) => {
     const decision = decisions[item.id] || 'keep'
@@ -175,16 +287,19 @@ function DecisionPage() {
         (loaded.plannedProducts ?? []).map((planned) => [planned.category, planned]),
       )
       const catalogById = Object.fromEntries(REAL_PRODUCT_CATALOG.map((product) => [product.id, product]))
-      const attachRealPrice = (item) => withRealPrice(item, plannedByCategory, catalogById)
+      const usedPlanned = new Set()
+      const attachRealPrice = (item) => withRealPrice(item, plannedByCategory, catalogById, usedPlanned)
 
       let activeObjects = loaded.detectedObjects?.length ? loaded.detectedObjects.map(attachRealPrice) : []
       const detectionErrors = []
+      let freshDetection = false
       const savedDecisions = loaded.decisions ?? {}
       const savedObjectDecisions = getObjectDecisions(savedDecisions)
       const savedReplacementBriefs = loaded.replacementBriefs
       const hasSavedDecisions = Object.keys(savedObjectDecisions).length > 0
       if (hasSavedDecisions) setDecisions(savedObjectDecisions)
       if (savedReplacementBriefs) setReplacementBriefs(savedReplacementBriefs)
+      baselineRef.current = choicesSnapshot(savedObjectDecisions, savedReplacementBriefs ?? {})
 
       // Detect against the AI-redesigned photo (has furniture in it), not
       // the original empty room — falls back to the original only if the
@@ -195,11 +310,15 @@ function DecisionPage() {
       if (cancelled) return
       const designs = getRoomDesigns(loaded, images).filter((room) => room.generatedImageUrl)
       setRoomDesigns(designs)
-      setActiveRoomId(designs[0]?.sourceImageId ?? 'demo')
+      // Decisions and product matching use the primary (first) angle only, so a
+      // piece of furniture seen from several angles is never counted twice.
+      const primaryRoomId = designs[0]?.sourceImageId
+      if (primaryRoomId) activeObjects = activeObjects.filter((item) => !item.roomId || item.roomId === primaryRoomId)
+      setActiveRoomId(designs[0]?.sourceImageId ?? '')
 
       if (!activeObjects.length && designs.length) {
         const detectedByRoom = []
-        for (const [roomIndex, room] of designs.entries()) {
+        for (const [roomIndex, room] of designs.slice(0, 1).entries()) {
           try {
             const detectResult = await api.post(`/projects/${id}/decisions/detect`, {
               image_url: room.generatedImageUrl,
@@ -213,25 +332,21 @@ function DecisionPage() {
               roomNumber: roomIndex + 1,
             }))
           } catch (err) {
-            detectionErrors.push(`ห้อง ${roomIndex + 1}: ${err.message || 'ตรวจจับไม่สำเร็จ'}`)
+            detectionErrors.push(`มุมหลัก: ${err.message || 'ตรวจจับไม่สำเร็จ'}`)
           }
           if (cancelled) return
         }
         if (detectedByRoom.length) {
           activeObjects = detectedByRoom
-          setIsRealDetection(true)
+          freshDetection = true
         }
         if (detectionErrors.length) setDetectError(detectionErrors.join(' · '))
-      } else if (activeObjects.length) {
-        setIsRealDetection(true)
       }
 
-      if (!activeObjects.length && !designs.length) {
-        const fallbackRoomId = designs[0]?.sourceImageId ?? 'demo'
-        activeObjects = DEMO_OBJECTS.map((item) => ({ ...item, roomId: fallbackRoomId, roomNumber: 1 }))
-      } else if (!activeObjects.length && !detectionErrors.length) {
+      if (!activeObjects.length && designs.length && !detectionErrors.length) {
         setDetectError('AI ยังไม่พบวัตถุใหม่ที่มั่นใจเพียงพอ ระบบจึงไม่วาด Selection ที่อาจผิดตำแหน่ง')
       }
+      if (activeObjects.length) setIsScoring(true)
       setObjects(activeObjects)
       setActiveId(activeObjects[0]?.id ?? '')
       if (!hasSavedDecisions) setDecisions(Object.fromEntries(activeObjects.map((item) => [item.id, 'keep'])))
@@ -239,6 +354,38 @@ function DecisionPage() {
 
       if (!activeObjects.length) return
 
+      // Detection and AI scores are cached on the project so reopening this page
+      // does not pay for them again. The cache is only reused when nothing that
+      // feeds the scoring has changed.
+      const scoreKey = JSON.stringify([
+        loaded.roomType, loaded.style, loaded.budget, loaded.dimensions ?? null, loaded.requirements ?? [], loaded.aiInstructions ?? '',
+        activeObjects.map((item) => [item.id, item.name, item.category, item.price]),
+      ])
+      const applySuggestions = (list) => {
+        setAiSuggestions(Object.fromEntries(list.map((item) => [item.id, item])))
+        if (!hasSavedDecisions) setDecisions(getSuggestedDecisions(list))
+      }
+      const writeCache = async (aiScores) => {
+        try {
+          const current = await getProject(id)
+          if (!current) return
+          const updated = await updateProject(id, {
+            decisions: withWorkflowData(current.decisions ?? {}, { detectedObjects: activeObjects, ...(aiScores ? { aiScores } : {}) }),
+          })
+          if (!cancelled) setProject(updated)
+        } catch {
+          // cache only — the page works without it
+        }
+      }
+
+      if (loaded.aiScores?.key === scoreKey) {
+        applySuggestions(loaded.aiScores.objects)
+        setIsScoring(false)
+        if (freshDetection) await writeCache(null)
+        return
+      }
+
+      let freshScores = null
       try {
         const suggestResult = await api.post(`/projects/${id}/decisions/suggest`, {
           room_type: loaded.roomType,
@@ -250,14 +397,15 @@ function DecisionPage() {
           detected_objects: activeObjects.map((item) => ({ id: item.id, name: item.name, category: item.category, price: item.price })),
         })
         if (!cancelled) {
-          setAiSuggestions(Object.fromEntries(suggestResult.objects.map((item) => [item.id, item])))
-          if (!hasSavedDecisions) {
-            setDecisions(getSuggestedDecisions(suggestResult.objects))
-          }
+          applySuggestions(suggestResult.objects)
+          freshScores = { key: scoreKey, objects: suggestResult.objects }
         }
       } catch {
         if (!cancelled) setAiError('AI วิเคราะห์คะแนนไม่สำเร็จ')
+      } finally {
+        if (!cancelled) setIsScoring(false)
       }
+      if (!cancelled && (freshScores || freshDetection)) await writeCache(freshScores)
     }
 
     run().finally(() => {
@@ -281,34 +429,56 @@ function DecisionPage() {
     return (
       <div className="decision-shell">
         <header className="decision-topbar"><Link to={`/project/${project.id}/result`}>← กลับไปดูผลลัพธ์</Link><span>ROOMLY AI · DECISION</span><button className="decision-save-draft" type="button" disabled>บันทึกร่างและออก</button></header>
-        <main className="decision-content"><section className="decision-detection-state"><img src={roomDesigns[0]?.generatedImageUrl || decisionRoom} alt="ภาพห้องที่กำลังตรวจจับวัตถุ" /><div><span>{isDetecting ? 'AI DETECTION IN PROGRESS' : 'NO RELIABLE DETECTION'}</span><h1>{isDetecting ? 'กำลังตรวจจับวัตถุอย่างละเอียด' : 'ยังไม่พบวัตถุที่มั่นใจเพียงพอ'}</h1><p>{isDetecting ? 'ระบบกำลังเทียบภาพต้นฉบับกับภาพ AI และตรวจ mask ก่อนแสดง Selection' : detectError}</p>{!isDetecting ? <button type="button" onClick={() => window.location.reload()}>ลองตรวจจับอีกครั้ง</button> : null}</div></section></main>
+        <main className="decision-content"><section className="decision-detection-state"><img src={roomDesigns[0]?.generatedImageUrl || decisionRoom} alt="ภาพห้องที่กำลังตรวจจับวัตถุ" /><div><span>{isDetecting ? 'AI DETECTION IN PROGRESS' : roomDesigns.length ? 'NO RELIABLE DETECTION' : 'NO AI DESIGN YET'}</span><h1>{isDetecting ? 'กำลังตรวจจับวัตถุอย่างละเอียด' : roomDesigns.length ? 'ยังไม่พบวัตถุที่มั่นใจเพียงพอ' : 'ยังไม่มีภาพที่ AI สร้าง'}</h1><p>{isDetecting ? 'ระบบกำลังเทียบภาพต้นฉบับกับภาพ AI และตรวจ mask ก่อนแสดง Selection' : roomDesigns.length ? detectError : 'ต้องให้ AI สร้างแบบห้องก่อน จึงจะเริ่มตัดสินใจเรื่องเฟอร์นิเจอร์ได้'}</p>{!isDetecting ? (roomDesigns.length ? <button type="button" onClick={() => window.location.reload()}>ลองตรวจจับอีกครั้ง</button> : <Link className="decision-detection-link" to={`/project/${project.id}/generate`}>ไปสร้างแบบที่หน้า AI Generate</Link>) : null}</div></section></main>
       </div>
     )
   }
 
-  async function continueToProducts() {
-    const storedDesigns = roomDesigns.map((room) => ({ ...room }))
-    const savedState = withWorkflowData({ ...decisions, __replacementBriefs: replacementBriefs }, { generatedImages: storedDesigns, detectedObjects: objects })
-    await updateProject(project.id, { decisions: savedState, estimatedTotal: total, stage: 'summary', status: 'in-progress', progress: 84 })
-    navigate(`/project/${project.id}/summary`)
+  async function saveAndLeave(patch, path) {
+    if (savingRef.current) return
+    savingRef.current = true
+    clearTimeout(autoSaveTimer.current)
+    setIsSaving(true)
+    setSaveError('')
+    try {
+      const savedState = buildDecisions(project, decisions, replacementBriefs, { generatedImages: roomDesigns, detectedObjects: objects })
+      await updateProject(project.id, { decisions: savedState, estimatedTotal: total, status: 'in-progress', ...patch })
+      dirtyRef.current = false
+      baselineRef.current = choicesSnapshot(decisions, replacementBriefs)
+      setAutoSaveStatus('idle')
+      navigate(path)
+    } catch {
+      setSaveError('บันทึกไม่สำเร็จ กรุณาตรวจอินเทอร์เน็ตแล้วลองอีกครั้ง ข้อมูลที่เลือกยังอยู่ในหน้านี้')
+      savingRef.current = false
+      setIsSaving(false)
+    }
   }
 
-  async function saveDraft() {
-    const savedState = withWorkflowData({ ...decisions, __replacementBriefs: replacementBriefs }, { generatedImages: roomDesigns, detectedObjects: objects })
-    await updateProject(project.id, { decisions: savedState, estimatedTotal: total, stage: 'object-decision', status: 'in-progress', progress: 67 })
-    navigate('/home')
+  function continueToProducts() {
+    return saveAndLeave({ stage: 'summary', progress: 84 }, `/project/${project.id}/summary`)
+  }
+
+  function saveDraft() {
+    return saveAndLeave({ stage: 'object-decision', progress: 67 }, '/home')
+  }
+
+  async function leaveTo(event, path) {
+    event.preventDefault()
+    clearTimeout(autoSaveTimer.current)
+    if (dirtyRef.current && !(await persistDecisions())) return
+    navigate(path)
   }
 
   const activeRoom = roomDesigns.find((room) => room.sourceImageId === activeRoomId) ?? roomDesigns[0]
   const visibleObjects = objects.filter((item) => !item.roomId || item.roomId === (activeRoom?.sourceImageId ?? activeRoomId))
-
-  function selectRoom(roomId) {
-    setActiveRoomId(roomId)
-    const firstObject = objects.find((item) => item.roomId === roomId)
-    if (firstObject) setActiveId(firstObject.id)
-  }
+  const drawnObjects = visibleObjects.filter((item) => !item.removedFromImage)
+  const countedObjects = objects.filter((item) => decisions[item.id] !== 'remove')
+  const estimatedCount = countedObjects.filter((item) => !item.realProduct).length
 
   function chooseDecision(decision) {
+    if (activeObject.removedFromImage && decision !== 'remove') return
+    dirtyRef.current = true
+    changeVersion.current += 1
     setDecisions((current) => ({ ...current, [activeObject.id]: decision }))
     if (decision === 'replace' && !replacementBriefs[activeObject.id]) {
       setReplacementBriefs((current) => ({ ...current, [activeObject.id]: { budget: activeObject.price, note: '' } }))
@@ -316,17 +486,16 @@ function DecisionPage() {
   }
 
   function updateReplacementBrief(patch) {
+    dirtyRef.current = true
+    changeVersion.current += 1
     setReplacementBriefs((current) => ({
       ...current,
       [activeObject.id]: { budget: activeObject.price, note: '', ...current[activeObject.id], ...patch },
     }))
   }
 
-  async function saveDesigns(nextDesigns, nextDecisions, extra = {}) {
-    const savedState = withWorkflowData(
-      { ...nextDecisions, __replacementBriefs: replacementBriefs },
-      { generatedImages: nextDesigns, detectedObjects: objects },
-    )
+  async function saveDesigns(nextDesigns, nextDecisions, extra = {}, nextObjects = objects) {
+    const savedState = buildDecisions(project, nextDecisions, replacementBriefs, { generatedImages: nextDesigns, detectedObjects: nextObjects })
     const updated = await updateProject(project.id, {
       decisions: savedState,
       generatedImageUrl: nextDesigns[0]?.generatedImageUrl,
@@ -336,7 +505,9 @@ function DecisionPage() {
       progress: 67,
       ...extra,
     })
+    baselineRef.current = choicesSnapshot(nextDecisions, replacementBriefs)
     setRoomDesigns(nextDesigns)
+    setObjects(nextObjects)
     setProject(updated)
   }
 
@@ -357,6 +528,8 @@ function DecisionPage() {
         objectName: entry.objectName,
         action: entry.action,
         previousDecision: entry.previousDecision,
+        appliedProductId: entry.appliedProductId,
+        previousShownProductId: entry.previousShownProductId,
       }
       const nextDesigns = roomDesigns.map((room) => room.sourceImageId !== activeRoom.sourceImageId ? room : {
         ...room,
@@ -368,7 +541,15 @@ function DecisionPage() {
       if (direction === 'undo') nextDecisions[entry.objectId] = entry.previousDecision ?? 'keep'
       else nextDecisions[entry.objectId] = entry.action
       setDecisions(nextDecisions)
-      await saveDesigns(nextDesigns, nextDecisions)
+      const nextObjects = objects.map((item) => {
+        if (item.id !== entry.objectId) return item
+        let next = item
+        if (entry.action === 'remove') next = { ...next, removedFromImage: direction === 'redo' }
+        if (entry.appliedProductId !== undefined) next = { ...next, shownProductId: direction === 'redo' ? entry.appliedProductId : (entry.previousShownProductId ?? undefined) }
+        return next
+      })
+      await saveDesigns(nextDesigns, nextDecisions, {}, nextObjects)
+      setActiveId(entry.objectId)
     } catch (error) {
       setRegenerateError(error.message || 'ย้อนภาพไม่สำเร็จ กรุณาลองใหม่')
     } finally {
@@ -400,14 +581,17 @@ function DecisionPage() {
             objectId: activeObject.id,
             objectName: activeObject.name,
             action: activeDecision,
-            previousDecision: 'keep',
+            previousDecision: lastAppliedAction(room, activeObject.id) ?? 'keep',
           }].slice(-10),
           future: [],
         }
         : room)
       const nextSelections = { ...(project.productSelections ?? {}) }
       delete nextSelections[activeObject.id]
-      await saveDesigns(nextDesigns, decisions, { productSelections: nextSelections })
+      const nextObjects = activeDecision === 'remove'
+        ? objects.map((item) => item.id === activeObject.id ? { ...item, removedFromImage: true } : item)
+        : objects
+      await saveDesigns(nextDesigns, decisions, { productSelections: nextSelections }, nextObjects)
     } catch (error) {
       setRegenerateError(error.message || 'สร้างเฉพาะวัตถุนี้ไม่สำเร็จ กรุณาลองใหม่')
     } finally {
@@ -415,8 +599,46 @@ function DecisionPage() {
     }
   }
 
+  // Other angles are generated to match the primary angle's picture. Once the
+  // primary picture changes (Replace / Remove / undo) they no longer match.
+  const primaryDesign = roomDesigns[0]
+  const otherDesigns = roomDesigns.slice(1)
+  const primaryEdited = Boolean(primaryDesign?.history?.length)
+  const staleAngles = otherDesigns.filter((room) => (room.syncedWith ? room.syncedWith !== primaryDesign.generatedImageUrl : primaryEdited))
+
+  async function syncOtherAngles() {
+    if (isSyncing || !staleAngles.length || !primaryDesign?.generatedImageUrl) return
+    setIsSyncing(true)
+    setSyncError('')
+    let working = roomDesigns
+    try {
+      for (const [index, room] of staleAngles.entries()) {
+        setSyncProgress({ done: index, total: staleAngles.length })
+        const query = new URLSearchParams({ style: project.style, budget: String(project.budget) })
+        if (project.aiInstructions) query.set('ai_instructions', project.aiInstructions)
+        query.set('source_image_url', room.sourceImageUrl)
+        query.set('reference_room_url', primaryDesign.generatedImageUrl)
+        appendRoomSize(query, project.dimensions)
+        const result = await api.post(`/projects/${project.id}/generate?${query}`, {})
+        working = working.map((item) => item.sourceImageId === room.sourceImageId
+          ? { ...item, generatedImageUrl: result.image_url, syncedWith: primaryDesign.generatedImageUrl }
+          : item)
+        await saveDesigns(working, decisions)
+      }
+    } catch (error) {
+      setSyncError(error.message || 'อัปเดตมุมอื่นไม่สำเร็จ มุมที่สำเร็จแล้วยังถูกบันทึกไว้ ลองใหม่ได้')
+    } finally {
+      setIsSyncing(false)
+      setSyncProgress(null)
+    }
+  }
+
   const activeDecision = decisions[activeObject.id] || 'keep'
   const activeReplacementBrief = replacementBriefs[activeObject.id] ?? { budget: activeObject.price, note: '' }
+  const replacedInImage = activeDecision === 'replace' && lastAppliedAction(activeRoom, activeObject.id) === 'replace'
+  const shownProduct = activeObject.shownProductId ? REAL_PRODUCT_CATALOG.find((product) => product.id === activeObject.shownProductId) : null
+  const undoEntry = activeRoom?.history?.[activeRoom.history.length - 1]
+  const redoEntry = activeRoom?.future?.[activeRoom.future.length - 1]
   const activeContribution = activeDecision === 'remove'
     ? 0
     : activeDecision === 'replace'
@@ -428,9 +650,16 @@ function DecisionPage() {
   return (
     <div className="decision-shell">
       <header className="decision-topbar">
-        <Link to={`/project/${project.id}/result`}>← กลับไปดูผลลัพธ์</Link>
+        <Link to={`/project/${project.id}/result`} onClick={(event) => leaveTo(event, `/project/${project.id}/result`)}>← กลับไปดูผลลัพธ์</Link>
         <span>ROOMLY AI · DECISION</span>
-        <button className="decision-save-draft" type="button" disabled={isRegenerating} onClick={saveDraft}>บันทึกร่างและออก</button>
+        <div className="decision-topbar-actions">
+          {autoSaveStatus !== 'idle' ? (
+            <small className={`decision-autosave is-${autoSaveStatus}`} role="status">
+              {autoSaveStatus === 'error' ? 'บันทึกอัตโนมัติไม่สำเร็จ' : autoSaveStatus === 'saved' ? 'บันทึกอัตโนมัติแล้ว' : 'กำลังบันทึก...'}
+            </small>
+          ) : null}
+          <button className="decision-save-draft" type="button" disabled={isRegenerating || isSaving || isSyncing} onClick={saveDraft}>บันทึกร่างและออก</button>
+        </div>
       </header>
 
       <main className="decision-content">
@@ -446,17 +675,29 @@ function DecisionPage() {
           <div className="is-remove"><span>นำออก</span><strong>{decisionCounts.remove}</strong><small>REMOVE</small></div>
         </section>
 
-        {roomDesigns.length > 1 ? <nav className="decision-room-tabs" aria-label="เลือกภาพห้อง">{roomDesigns.map((room, index) => {
-          const count = objects.filter((item) => item.roomId === room.sourceImageId).length
-          return <button className={activeRoom?.sourceImageId === room.sourceImageId ? 'is-active' : ''} type="button" onClick={() => selectRoom(room.sourceImageId)} key={room.sourceImageId}><span>ROOM {String(index + 1).padStart(2, '0')}</span><strong>{count} รายการที่ตรวจพบ</strong></button>
-        })}</nav> : null}
+        {roomDesigns.length > 1 ? (
+          <div className="decision-angle-note" role="status">
+            <p>
+              ตัดสินใจและเลือกสินค้าจากมุมหลัก (มุมที่ 1)
+              {staleAngles.length
+                ? ` · มุมอื่น ${staleAngles.length} จาก ${otherDesigns.length} มุมยังไม่ตรงกับมุมหลักที่แก้แล้ว`
+                : ` · มุมอื่นอีก ${otherDesigns.length} มุมตรงกับมุมหลักแล้ว`}
+            </p>
+            {staleAngles.length ? (
+              <button type="button" disabled={isSyncing || isRegenerating || isSaving} onClick={syncOtherAngles}>
+                {isSyncing && syncProgress ? `กำลังอัปเดตมุมอื่น ${syncProgress.done + 1}/${syncProgress.total}...` : `อัปเดตมุมอื่นให้ตรงกัน (ใช้เครดิต AI ${staleAngles.length} ครั้ง)`}
+              </button>
+            ) : null}
+            {syncError ? <small role="alert">{syncError}</small> : null}
+          </div>
+        ) : null}
 
         <section className="decision-workspace">
-          <div className="decision-visual">
-            <img src={activeRoom?.generatedImageUrl || decisionRoom} alt="ภาพห้องพร้อมจุดเลือกเฟอร์นิเจอร์" />
+          <div className="decision-visual" style={fitFrameStyle(imageRatio, 82)}>
+            <img src={activeRoom?.generatedImageUrl || decisionRoom} onLoad={(event) => setImageRatio(naturalRatio(event))} alt="ภาพห้องพร้อมจุดเลือกเฟอร์นิเจอร์" />
             {isRegenerating ? <div className="decision-regenerating" role="status"><span /><strong>AI กำลังแก้เฉพาะวัตถุที่เลือก</strong><small>ส่วนอื่นของห้องจะคงเดิม</small></div> : null}
             <svg className="decision-outline-layer" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-              {visibleObjects.map((item) => {
+              {drawnObjects.map((item) => {
                 const decision = decisions[item.id] || 'keep'
                 return (
                   <g key={item.id}>
@@ -472,7 +713,7 @@ function DecisionPage() {
                 )
               })}
             </svg>
-            {visibleObjects.map((item) => {
+            {drawnObjects.map((item) => {
               const decision = decisions[item.id] || 'keep'
               const box = getObjectBox(item)
               return (
@@ -490,25 +731,36 @@ function DecisionPage() {
             })}
             {(activeRoom?.history?.length || activeRoom?.future?.length) ? (
               <div className="decision-image-history" role="group" aria-label="ย้อนประวัติภาพ">
-                <button type="button" disabled={isRegenerating || !activeRoom.history?.length} onClick={() => stepImageHistory('undo')} title="กลับไปภาพก่อนหน้า ไม่เสียเครดิต AI">
+                <button type="button" disabled={isRegenerating || isSyncing || !activeRoom.history?.length} onClick={() => stepImageHistory('undo')} title={undoEntry ? `ย้อนการ${ACTION_LABELS[undoEntry.action] ?? 'แก้'} “${undoEntry.objectName}” กลับไปภาพก่อนหน้า ไม่เสียเครดิต AI` : 'กลับไปภาพก่อนหน้า ไม่เสียเครดิต AI'}>
                   ↶ เลิกทำ{activeRoom.history?.length ? ` (${activeRoom.history.length})` : ''}
                 </button>
-                <button type="button" disabled={isRegenerating || !activeRoom.future?.length} onClick={() => stepImageHistory('redo')} title="ทำซ้ำภาพที่เลิกทำไป ไม่เสียเครดิต AI">
+                <button type="button" disabled={isRegenerating || isSyncing || !activeRoom.future?.length} onClick={() => stepImageHistory('redo')} title={redoEntry ? `ทำซ้ำการ${ACTION_LABELS[redoEntry.action] ?? 'แก้'} “${redoEntry.objectName}” ไม่เสียเครดิต AI` : 'ทำซ้ำภาพที่เลิกทำไป ไม่เสียเครดิต AI'}>
                   ↷ ทำซ้ำ{activeRoom.future?.length ? ` (${activeRoom.future.length})` : ''}
                 </button>
+                <small className="decision-history-hint">{undoEntry ? `ล่าสุด: ${ACTION_LABELS[undoEntry.action] ?? 'แก้'} ${undoEntry.objectName}` : redoEntry ? `ทำซ้ำได้: ${ACTION_LABELS[redoEntry.action] ?? 'แก้'} ${redoEntry.objectName}` : ''}</small>
               </div>
             ) : null}
-            <span className="decision-demo-label">{isRealDetection ? 'AI DETECTED' : 'DEMO DETECTION'}{aiSuggestions ? ' · AI SCORED' : ''}</span>
+            <span className="decision-demo-label">AI DETECTED{aiSuggestions ? ' · AI SCORED' : ''}</span>
           </div>
 
           <aside className={`decision-panel is-${activeDecision}`}>
             <div className="decision-object-title">
               <span>{activeObject.category}</span>
-              <small>ห้อง {activeObject.roomNumber ?? 1} · รายการ {visibleObjects.findIndex((item) => item.id === activeObject.id) + 1} / {visibleObjects.length}</small>
+              <small>รายการ {visibleObjects.findIndex((item) => item.id === activeObject.id) + 1} / {visibleObjects.length}</small>
               <h2>{activeObject.name}</h2>
-              {activeObject.realProduct ? (
+              {shownProduct ? (
                 <p className="decision-real-price">
-                  ราคาจริง ฿{new Intl.NumberFormat('th-TH').format(activeObject.price)}
+                  ภาพ AI ใช้สินค้าจริงที่เลือกแล้ว · {livePrices[shownProduct.id]?.price ? 'ราคาสด' : 'ราคา'} ฿{new Intl.NumberFormat('th-TH').format(priceOf(activeObject))}
+                  <span className="decision-real-price-source">{shownProduct.store} · {shownProduct.name}</span>
+                </p>
+              ) : replacedInImage ? (
+                <p className="decision-real-price">
+                  AI เปลี่ยนชิ้นนี้ในภาพแล้ว · งบ ฿{new Intl.NumberFormat('th-TH').format(Number(activeReplacementBrief.budget) || activeObject.price)}
+                  <span className="decision-real-price-source">สินค้าจริงจะถูกจับคู่ใหม่ในขั้นตอนถัดไป</span>
+                </p>
+              ) : activeObject.realProduct ? (
+                <p className="decision-real-price">
+                  {livePrices[activeObject.realProduct?.productId]?.price ? 'ราคาสดจากร้านค้า' : 'ราคาจริง'} ฿{new Intl.NumberFormat('th-TH').format(priceOf(activeObject))}
                   {activeObject.realProduct.url ? (
                     <a className="decision-real-price-source" href={activeObject.realProduct.url} target="_blank" rel="noreferrer">
                       {activeObject.realProduct.store} · {activeObject.realProduct.name}
@@ -522,22 +774,25 @@ function DecisionPage() {
               )}
             </div>
 
-            <div className="decision-score-summary"><div><strong>{activeObject.score}</strong><span>/ 100</span></div><p>{activeObject.reason}</p>{detectError || aiError ? <small className="decision-ai-error">{detectError || aiError}</small> : null}</div>
+            <div className="decision-score-summary"><div><strong>{aiSuggestion ? activeObject.score : '–'}</strong><span>/ 100</span></div><p>{aiSuggestion ? activeObject.reason : isScoring ? 'กำลังวิเคราะห์...' : 'ยังไม่มีคะแนนจาก AI ตอนนี้ คุณตัดสินใจเองได้เลย'}</p>{detectError || aiError ? <small className="decision-ai-error">{detectError || aiError}</small> : null}</div>
 
-            <div className="decision-score-list">
+            {aiSuggestion ? <div className="decision-score-list">
               {SCORE_LABELS.map((label, index) => (
                 <div key={label}><span>{label}</span><i><b style={{ width: `${(activeObject.scores[index] / SCORE_MAX[index]) * 100}%` }} /></i><strong>{activeObject.scores[index]}/{SCORE_MAX[index]}</strong></div>
               ))}
-            </div>
+            </div> : null}
 
             <fieldset className="decision-options">
               <legend>การตัดสินใจของคุณ</legend>
-              {DECISIONS.map((option) => (
-                <label className={decisions[activeObject.id] === option.id ? `is-selected is-${option.id}` : ''} key={option.id}>
-                  <input type="radio" name={`decision-${activeObject.id}`} checked={decisions[activeObject.id] === option.id} onChange={() => chooseDecision(option.id)} />
+              {DECISIONS.map((option) => {
+                const locked = Boolean(activeObject.removedFromImage) && option.id !== 'remove'
+                return (
+                <label className={`${decisions[activeObject.id] === option.id ? `is-selected is-${option.id}` : ''} ${locked ? 'is-locked' : ''}`.trim()} key={option.id} title={locked ? 'AI ลบชิ้นนี้ออกจากภาพแล้ว กด “เลิกทำ” เหนือภาพถ้าต้องการให้กลับมา' : undefined}>
+                  <input type="radio" name={`decision-${activeObject.id}`} checked={decisions[activeObject.id] === option.id} disabled={locked} onChange={() => chooseDecision(option.id)} />
                   <b aria-hidden="true">{option.icon}</b><span><strong>{option.label}</strong><small>{option.detail}</small></span><i />
                 </label>
-              ))}
+                )
+              })}
             </fieldset>
 
             {activeDecision === 'replace' ? (
@@ -553,7 +808,9 @@ function DecisionPage() {
               <section className="decision-action-card is-remove" aria-label="ผลจากการนำรายการออก">
                 <div><span>REMOVE CONFIRMED</span><strong>คืนพื้นที่ให้ห้องมากขึ้น</strong></div>
                 <p>รายการนี้จะไม่ถูกส่งไปจับคู่สินค้า และคืนงบประมาณประมาณ <b>฿{new Intl.NumberFormat('th-TH').format(activeObject.price)}</b></p>
-                <button className="decision-regenerate-button is-remove" type="button" disabled={isRegenerating} onClick={regenerateSelection}>{isRegenerating ? 'กำลังลบ...' : '− ลบเฉพาะชิ้นนี้ออกจากภาพ'}</button>
+                {activeObject.removedFromImage ? <p className="decision-removed-note">AI ลบชิ้นนี้ออกจากภาพแล้ว ถ้าอยากให้กลับมา ให้กด “เลิกทำ” เหนือภาพ</p> : (
+                  <button className="decision-regenerate-button is-remove" type="button" disabled={isRegenerating} onClick={regenerateSelection}>{isRegenerating ? 'กำลังลบ...' : '− ลบเฉพาะชิ้นนี้ออกจากภาพ'}</button>
+                )}
                 {regenerateError ? <small className="decision-regenerate-error" role="alert">{regenerateError}</small> : null}
               </section>
             ) : (
@@ -566,9 +823,9 @@ function DecisionPage() {
         </section>
 
         <footer className="decision-footer">
-          <div><span>ยอดประมาณการใหม่</span><strong>฿{new Intl.NumberFormat('th-TH').format(total)}</strong><small className={total > project.budget ? 'is-over' : ''}>{total <= project.budget ? `เหลืองบ ฿${new Intl.NumberFormat('th-TH').format(project.budget - total)}` : `เกินงบ ฿${new Intl.NumberFormat('th-TH').format(total - project.budget)}`}</small></div>
-          <p className={isOverBudget ? 'is-over' : ''}>{isOverBudget ? <>ต้องลดอีก <b>฿{new Intl.NumberFormat('th-TH').format(total - project.budget)}</b> ก่อนดำเนินการต่อ</> : <><b>{decisionCounts.replace}</b> รายการรอหาสินค้าทดแทน · <b>{decisionCounts.remove}</b> รายการจะถูกนำออก</>}</p>
-          <button type="button" disabled={isOverBudget || isRegenerating} onClick={continueToProducts}>{isOverBudget ? 'ยอดรวมยังเกินงบ' : isRegenerating ? 'รอ AI สร้างภาพให้เสร็จ' : 'ยืนยันและไปดูสรุป'} <span>{isOverBudget ? '!' : '→'}</span></button>
+          <div><span>ยอดประมาณการใหม่</span><strong>฿{new Intl.NumberFormat('th-TH').format(total)}</strong><small className={total > project.budget ? 'is-over' : ''}>{total <= project.budget ? `เหลืองบ ฿${new Intl.NumberFormat('th-TH').format(project.budget - total)}` : `เกินงบ ฿${new Intl.NumberFormat('th-TH').format(total - project.budget)}`}</small>{estimatedCount > 0 ? <small className="decision-price-mix">รวมราคาที่ AI ประมาณการ {estimatedCount} ชิ้น</small> : null}</div>
+          <p className={isOverBudget || saveError ? 'is-over' : ''} role={saveError ? 'alert' : undefined}>{saveError ? saveError : isOverBudget ? <>ต้องลดอีก <b>฿{new Intl.NumberFormat('th-TH').format(total - project.budget)}</b> ก่อนดำเนินการต่อ</> : <><b>{decisionCounts.replace}</b> รายการรอหาสินค้าทดแทน · <b>{decisionCounts.remove}</b> รายการจะถูกนำออก</>}</p>
+          <button type="button" disabled={isOverBudget || isRegenerating || isSaving || isSyncing} onClick={continueToProducts}>{isOverBudget ? 'ยอดรวมยังเกินงบ' : isRegenerating ? 'รอ AI สร้างภาพให้เสร็จ' : isSaving ? 'กำลังบันทึก...' : 'ยืนยันและไปดูสรุป'} <span>{isOverBudget ? '!' : '→'}</span></button>
         </footer>
       </main>
     </div>

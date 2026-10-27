@@ -1,6 +1,7 @@
 import { supabase } from './supabase'
 
 const BUCKET = 'room-images'
+export const MAX_ROOM_IMAGES = 6
 
 export async function saveProjectImages(projectId, files) {
   for (const file of files) {
@@ -30,8 +31,24 @@ export async function getProjectImages(projectId) {
     .sort((first, second) => String(first.createdAt ?? first.name).localeCompare(String(second.createdAt ?? second.name)))
 }
 
-export async function deleteProjectImages(projectId) {
-  const { data } = await supabase.storage.from(BUCKET).list(projectId)
+async function removeFolder(folder) {
+  const { data } = await supabase.storage.from(BUCKET).list(folder)
   if (!data?.length) return
-  await supabase.storage.from(BUCKET).remove(data.map((file) => `${projectId}/${file.name}`))
+  const { error } = await supabase.storage.from(BUCKET).remove(data.map((file) => `${folder}/${file.name}`))
+  if (error) throw error
+}
+
+/** Removes only the AI-generated pictures (`generated/{id}/`), e.g. when a project's results are reset. */
+export const deleteGeneratedImages = (projectId) => removeFolder(`generated/${projectId}`)
+
+/** Removes the room photos and the AI-generated pictures of a project. */
+export async function deleteProjectImages(projectId) {
+  await removeFolder(projectId)
+  await deleteGeneratedImages(projectId)
+}
+
+export async function deleteProjectImagesByPath(paths) {
+  if (!paths.length) return
+  const { error } = await supabase.storage.from(BUCKET).remove(paths)
+  if (error) throw error
 }

@@ -87,6 +87,22 @@ async def ask_vision_json(
     return json.loads(content) if content else {}
 
 
+def pick_image_size(width: int, height: int, default: str = "1024x1024") -> str:
+    """The gpt-image-1 canvas closest to the source photo's orientation.
+
+    gpt-image-1 only offers square, 3:2 landscape and 2:3 portrait, so a
+    landscape room photo is no longer forced into a square result.
+    """
+    if width <= 0 or height <= 0:
+        return default
+    ratio = width / height
+    if ratio >= 1.15:
+        return "1536x1024"
+    if ratio <= 0.87:
+        return "1024x1536"
+    return "1024x1024"
+
+
 async def generate_image(prompt: str) -> bytes:
     """Generates one image from a text prompt and returns raw PNG bytes.
 
@@ -113,6 +129,7 @@ async def edit_image(
     prompt: str,
     image_bytes: bytes,
     reference_images: list[tuple[str, bytes, str]] | None = None,
+    size: str | None = None,
 ) -> bytes:
     """Edits an existing room photo (gpt-image-1) and returns raw PNG bytes.
 
@@ -135,7 +152,7 @@ async def edit_image(
         model=settings.openai_image_model,
         image=images if len(images) > 1 else images[0],
         prompt=prompt,
-        size=settings.openai_image_size,
+        size=size or settings.openai_image_size,
         quality=settings.openai_image_quality,
         input_fidelity="high",
         n=1,
@@ -143,8 +160,14 @@ async def edit_image(
     return base64.b64decode(response.data[0].b64_json)
 
 
-async def edit_image_region(prompt: str, image_bytes: bytes, mask_bytes: bytes) -> bytes:
-    """Edits only the transparent area of an RGBA PNG mask."""
+async def edit_image_region(
+    prompt: str,
+    image_bytes: bytes,
+    mask_bytes: bytes,
+    size: str | None = None,
+    reference_images: list[tuple[str, bytes, str]] | None = None,
+) -> bytes:
+    """Edits only the transparent area of an RGBA PNG mask (optionally guided by reference photos)."""
     client = get_openai_client()
     if client is None:
         raise RuntimeError("OPENAI_API_KEY is not set")
@@ -152,10 +175,10 @@ async def edit_image_region(prompt: str, image_bytes: bytes, mask_bytes: bytes) 
     settings = get_settings()
     response = await client.images.edit(
         model=settings.openai_image_model,
-        image=("room.png", image_bytes, "image/png"),
+        image=[("room.png", image_bytes, "image/png"), *reference_images] if reference_images else ("room.png", image_bytes, "image/png"),
         mask=("selection-mask.png", mask_bytes, "image/png"),
         prompt=prompt,
-        size=settings.openai_image_size,
+        size=size or settings.openai_image_size,
         quality=settings.openai_image_quality,
         input_fidelity="high",
         n=1,

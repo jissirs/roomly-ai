@@ -49,6 +49,8 @@ export function getRoomDesigns(project, images = []) {
       // so removing/replacing an object can be undone without calling AI.
       history: result?.history ?? [],
       future: result?.future ?? [],
+      // The primary-angle picture this angle was generated to match (if any).
+      syncedWith: result?.syncedWith,
     }
   })
 }
@@ -78,6 +80,7 @@ function fromRow(row) {
     generatedImages: workflow.generatedImages ?? [],
     detectedObjects: workflow.detectedObjects ?? [],
     plannedProducts: workflow.plannedProducts ?? [],
+    aiScores: workflow.aiScores,
     replacementBriefs: decisions.__replacementBriefs ?? {},
     productSelections: row.product_selections ?? {},
     estimatedTotal: row.estimated_total ?? undefined,

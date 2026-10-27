@@ -58,3 +58,17 @@ export function getCurrentUser() {
     return null
   }
 }
+
+/** Emails a one-time reset link (Supabase). The link opens /reset-password signed in for recovery only. */
+export async function requestPasswordReset(email) {
+  const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/reset-password` })
+  if (error) throw error
+}
+
+/** Sets the password of the account the recovery link signed in, then ends that session. */
+export async function setNewPassword(password) {
+  const { error } = await supabase.auth.updateUser({ password })
+  if (error) throw error
+  await supabase.auth.signOut()
+  localStorage.removeItem(USER_CACHE_KEY)
+}

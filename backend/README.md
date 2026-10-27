@@ -1,70 +1,72 @@
 # Roomly AI — AI Service
 
-FastAPI service that does one thing: calls OpenAI for the pieces of the product flow that need a server-side secret key. Everything else — auth, the `projects` table, room-photo storage, the product catalog — lives directly in Supabase and is called from the frontend (see `../frontend/src/lib/supabase.js`). This service has no database of its own.
+FastAPI service ที่ทำหน้าที่เดียว: เรียก OpenAI และโมเดลตัดภาพในส่วนที่ต้องใช้ secret key ฝั่งเซิร์ฟเวอร์ ส่วนที่เหลือ (auth, ตาราง `projects`, ภาพ, แคตตาล็อกสินค้า) อยู่ใน Supabase และถูกเรียกจาก frontend โดยตรง service นี้ไม่มีฐานข้อมูลของตัวเอง
 
 ## โครงสร้าง
 
 ```
 backend/
 ├── app/
-│   ├── main.py                # FastAPI app, CORS, router mount
+│   ├── main.py                 # FastAPI app, CORS, security headers, ตรวจค่า production ตอนเริ่ม
 │   ├── core/
-│   │   ├── config.py           # env-based settings (pydantic-settings)
-│   │   └── openai_client.py    # OpenAI wrapper (text / vision / image-gen)
+│   │   ├── config.py           # ค่าตั้งจาก environment
+│   │   ├── rate_limit.py       # เพดานการเรียก AI ต่อผู้ใช้ (ต่อนาที/ต่อวัน)
+│   │   ├── openai_client.py    # OpenAI wrapper (text / vision / image)
+│   │   └── supabase_storage.py # อัปโหลดภาพที่ AI สร้างด้วย token ของผู้ใช้
 │   ├── api/
-│   │   ├── deps.py             # get_current_user_id — validates the caller's
-│   │   │                         Supabase access token via Supabase's own
-│   │   │                         /auth/v1/user endpoint (no JWT secret needed)
-│   │   └── v1/
-│   │       ├── router.py        # aggregates routers under /api/v1
-│   │       ├── decisions.py     # POST .../decisions/detect, .../decisions/suggest
-│   │       └── generate.py      # POST /projects/{id}/generate
-│   ├── schemas/
-│   │   └── decision.py          # request/response DTOs (pydantic)
-│   └── services/
-│       └── ai_service.py        # the actual OpenAI calls
-├── supabase/
-│   ├── schema.sql               # run once in the Supabase SQL editor
-│   └── seed_products.sql        # curated product catalog seed
-├── tests/
-├── requirements.txt
+│   │   ├── deps.py             # ตรวจ token, ตรวจว่าเป็นเจ้าของโปรเจกต์, rate limit, จำกัด URL ภาพ
+│   │   └── v1/                 # generate, decisions, styles, products
+│   └── services/               # ai_service, object_segmentation, price_service, image_difference
+├── models/                     # น้ำหนักโมเดล (ดาวน์โหลดอัตโนมัติครั้งแรก; อยู่นอก git)
+├── scripts/                    # เครื่องมือดูแลแคตตาล็อก (add_products, refresh_prices)
+├── supabase/                   # schema.sql + seed_products.sql
+├── Dockerfile
 └── .env.example
 ```
 
-## Endpoints (all require `Authorization: Bearer <supabase-access-token>`)
+## Endpoints
 
-- `POST /projects/{id}/decisions/detect` — `{image_url}` → detects furniture in a room photo (vision, gpt-4o-mini). Returns a best-effort item list with estimated position — not pixel-accurate; a dedicated detection model would be needed for that.
-- `POST /projects/{id}/decisions/suggest` — `{room_type, style, budget, ai_instructions, detected_objects}` → scores each object and recommends keep/replace/remove (text, gpt-4o-mini).
-- `POST /projects/{id}/generate?style=...&ai_instructions=...` → generates a redesigned room image (dall-e-2, 512×512 — cheapest option). Returns `{image_url}`; the URL is OpenAI-hosted and expires after about an hour, so save it (e.g. to Supabase Storage) if it needs to persist.
+ทุกเส้นต้องมี `Authorization: Bearer <supabase-access-token>`
 
-All three model choices are the cheapest OpenAI offers for the job — swap `openai_vision_model` / `openai_image_model` in `core/config.py` for higher quality later.
+| Method | Path | หน้าที่ |
+|---|---|---|
+| POST | `/api/v1/projects/{id}/generate` | สร้างภาพห้องใหม่จากภาพจริง |
+| POST | `/api/v1/projects/{id}/decisions/detect` | ตรวจจับเฟอร์นิเจอร์ + เส้นขอบ |
+| POST | `/api/v1/projects/{id}/decisions/suggest` | ให้คะแนนและแนะนำ Keep/Replace/Remove |
+| POST | `/api/v1/projects/{id}/decisions/regenerate` | แก้เฉพาะชิ้น (ลบ/เปลี่ยน/ใส่สินค้าจริง) |
+| POST | `/api/v1/styles/recommend` | แนะนำสไตล์จากภาพห้อง |
+| POST | `/api/v1/products/prices` | ราคาและสต็อกสดจากหน้าสินค้า IKEA / HomePro |
+| GET | `/health` | ตรวจสถานะ (ไม่ต้องล็อกอิน) |
+
+เส้นที่ผูกกับ `{id}` ตรวจว่าผู้เรียกเป็นเจ้าของโปรเจกต์ (ผ่าน RLS ของ Supabase), URL ภาพต้องเป็น Supabase Storage ของโปรเจกต์นี้เท่านั้น (รูปสินค้าต้องมาจาก IKEA / HomePro), และเส้น AI ถูกจำกัดต่อผู้ใช้ตาม `AI_REQUESTS_PER_MINUTE` / `AI_REQUESTS_PER_DAY` (ตอบ 429 เมื่อเกิน)
+
+## ตั้งค่า (environment)
+
+ดู `.env.example` ค่าสำคัญ: `ENVIRONMENT=production`, `CORS_ORIGINS` (โดเมนจริงของ frontend), `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `OPENAI_API_KEY`, `OPENAI_IMAGE_MODEL` (ค่าเริ่มต้น `gpt-image-1.5`), `AI_ENABLED`
+
+เมื่อ `ENVIRONMENT=production` เซิร์ฟเวอร์ปิด `/docs` และ **ไม่ยอมเริ่ม** ถ้าไม่มี Supabase/OpenAI key หรือ `CORS_ORIGINS` ยังเป็น localhost
 
 ## รัน
 
-ต้องมี Python 3.11+ และ [Supabase project ที่ตั้งค่าแล้ว](../README.md)
-
 ```bash
-cd backend
 python -m venv venv
-venv\Scripts\activate          # Windows
-# source venv/bin/activate     # macOS/Linux
-
+venv\Scripts\activate          # Windows  (macOS/Linux: source venv/bin/activate)
 pip install -r requirements.txt
-copy .env.example .env         # แล้วแก้ค่าตามจริง (Windows: copy, macOS/Linux: cp)
-
-uvicorn app.main:app --reload --port 8000
+copy .env.example .env         # แล้วแก้ค่า (ในเครื่องใช้ ENVIRONMENT=development)
+uvicorn app.main:app --port 8000
 ```
 
-เปิด http://localhost:8000/docs สำหรับ Swagger UI, หรือ http://localhost:8000/health เพื่อเช็คว่า server รันอยู่
+ไม่ต้องใช้ `--reload` กับโหมดจริง
 
-### รันเทส
+### Docker
 
 ```bash
-pytest
+docker build -t roomly-api backend
+docker run -p 8000:8000 --env-file backend/.env roomly-api
 ```
 
-## ขั้นตอนถัดไปที่ยังไม่ทำ
+ใช้ **1 worker** (ค่าเริ่มต้นใน Dockerfile) เพราะตัวจำกัดการเรียก AI เก็บในหน่วยความจำของแต่ละโปรเซส ถ้าจะรันหลายโปรเซส/หลายเครื่อง ให้ย้ายตัวจำกัดไป Redis ก่อน โมเดลตัดภาพกิน RAM ราว 1–2 GB เลือกเครื่องให้พอ
 
-- ต่อ Object Decision UI (`frontend/src/pages/Decision/DecisionPage.jsx`) ให้เรียก `/decisions/detect` ด้วยภาพห้องจริงของโปรเจกต์ แทนรายการเฟอร์นิเจอร์ที่ยังฝังโค้ดอยู่ (`OBJECTS` ในไฟล์เดียวกัน)
-- ต่อ AI Generate (`frontend/src/pages/Generate/GeneratePage.jsx`) ให้เรียก `/projects/{id}/generate` จริง แทนการจำลองด้วย `setTimeout`
-- เก็บภาพที่ dall-e-2 สร้างไว้ถาวรใน Supabase Storage ก่อน URL ของ OpenAI หมดอายุ
+### เครื่องมือแคตตาล็อก
+
+`scripts/refresh_prices.py` อัปเดตราคาอ้างอิงในตาราง `products`, `scripts/add_products.py` เพิ่มสินค้าใหม่

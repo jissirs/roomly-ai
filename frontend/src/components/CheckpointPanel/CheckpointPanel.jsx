@@ -7,6 +7,7 @@ const STAGE_LABELS = {
   'ai-generate': 'AI Generate',
   result: 'ดูผลลัพธ์',
   'object-decision': 'ตัดสินใจเฟอร์นิเจอร์',
+  summary: 'สรุปผล',
   'product-matching': 'เลือกสินค้า',
   saved: 'บันทึกแล้ว',
 }

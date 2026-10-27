@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { addProject, getProject, updateProject } from '../../lib/projects'
+import { addProject, getProject, updateProject, withWorkflowData } from '../../lib/projects'
 import { api } from '../../lib/api'
-import { getProjectImages, saveProjectImages } from '../../lib/imageStore'
+import { MAX_ROOM_IMAGES, deleteGeneratedImages, deleteProjectImagesByPath, getProjectImages, saveProjectImages } from '../../lib/imageStore'
 import './CreateProjectPage.css'
 
 const FLOW_STEPS = [
@@ -10,8 +10,9 @@ const FLOW_STEPS = [
   { number: '02', title: 'AI Generate', detail: 'ออกแบบและใส่เฟอร์นิเจอร์' },
   { number: '03', title: 'Result', detail: 'ดูภาพห้องที่ออกแบบแล้ว' },
   { number: '04', title: 'Object Decision', detail: 'Keep / Replace / Remove' },
-  { number: '05', title: 'Product Match', detail: 'สินค้า IKEA / Shopee' },
-  { number: '06', title: 'Save Project', detail: 'บันทึกผลลัพธ์ลงคลัง' },
+  { number: '05', title: 'Summary', detail: 'สรุปผลการตัดสินใจ' },
+  { number: '06', title: 'Product Match', detail: 'สินค้า IKEA / HomePro' },
+  { number: '07', title: 'Save Project', detail: 'บันทึกผลลัพธ์ลงคลัง' },
 ]
 
 const ROOM_TYPES = [
@@ -58,20 +59,27 @@ async function fileToAnalysisDataUrl(file) {
   return canvas.toDataURL('image/jpeg', 0.82)
 }
 
-const MAX_ROOM_IMAGES = 6
+const MIN_BUDGET = 100
+const MAX_BUDGET = 1000000
+const BUDGET_STEP = 1000
 
-const REQUIREMENTS = [
-  'เพิ่มพื้นที่จัดเก็บ',
-  'มีมุมทำงาน',
-  'เน้นพักผ่อน',
-  'รองรับสัตว์เลี้ยง',
-]
+const DIMENSION_LIMITS = {
+  width: { min: 1, max: 30, label: 'ความกว้าง' },
+  length: { min: 1, max: 30, label: 'ความยาว' },
+  height: { min: 2, max: 6, label: 'ความสูง' },
+}
+
+function getDimensionError(field, value) {
+  if (value === '' || value === undefined) return ''
+  const { min, max, label } = DIMENSION_LIMITS[field]
+  const number = Number(value)
+  if (!Number.isFinite(number) || number < min || number > max) return `${label}ต้องอยู่ระหว่าง ${min}–${max} เมตร`
+  return ''
+}
 
 const CREATE_STEPS = [
-  { label: 'ภาพห้อง', detail: 'ตั้งชื่อและเพิ่มภาพ', title: 'เริ่มจากห้องของคุณ', description: 'ตั้งชื่อโปรเจกต์และอัปโหลดภาพห้องจริงอย่างน้อย 1 ภาพ' },
-  { label: 'ข้อมูลพื้นที่', detail: 'ประเภทและขนาดห้อง', title: 'บอกขนาดพื้นที่', description: 'ข้อมูลนี้ช่วยให้ระบบประเมินสัดส่วนและ Space Fit ได้สมเหตุสมผลขึ้น' },
-  { label: 'แนวทาง', detail: 'สไตล์และงบประมาณ', title: 'กำหนดแบบที่ต้องการ', description: 'เลือกบรรยากาศหลักและงบสูงสุดสำหรับคัดเลือกเฟอร์นิเจอร์' },
-  { label: 'ตรวจทาน', detail: 'ความต้องการเพิ่มเติม', title: 'ตรวจข้อมูลก่อนสร้าง', description: 'เพิ่มความต้องการเฉพาะ แล้วตรวจสอบข้อมูลสำคัญอีกครั้ง' },
+  { label: 'ห้องของคุณ', detail: 'ชื่อ ภาพ และขนาดห้อง', title: 'เริ่มจากห้องของคุณ', description: 'ตั้งชื่อ อัปโหลดภาพห้องจริงอย่างน้อย 1 ภาพ แล้วบอกประเภทและขนาดห้อง' },
+  { label: 'แบบที่ต้องการ', detail: 'สไตล์ งบ และความต้องการ', title: 'กำหนดแบบที่ต้องการ', description: 'เลือกสไตล์ งบสูงสุด และความต้องการ แล้วตรวจข้อมูลก่อนสร้างโปรเจกต์' },
 ]
 
 const ICON_PATHS = {
@@ -98,7 +106,9 @@ function CreateProjectPage() {
   const navigate = useNavigate()
   const { id } = useParams()
   const [existingProject, setExistingProject] = useState(null)
-  const [existingImageUrl, setExistingImageUrl] = useState('')
+  const [existingImages, setExistingImages] = useState([])
+  const [removedImageIds, setRemovedImageIds] = useState([])
+  const [showResetNotice, setShowResetNotice] = useState(false)
   const [isLoadingProject, setIsLoadingProject] = useState(Boolean(id))
 
   const [projectName, setProjectName] = useState('')
@@ -107,7 +117,6 @@ function CreateProjectPage() {
   const [roomType, setRoomType] = useState('living-room')
   const [style, setStyle] = useState('japandi')
   const [budget, setBudget] = useState(20000)
-  const [requirements, setRequirements] = useState(['เพิ่มพื้นที่จัดเก็บ'])
   const [dimensions, setDimensions] = useState({ width: '', length: '', height: '' })
   const [notes, setNotes] = useState('')
   const [activeStep, setActiveStep] = useState(0)
@@ -129,16 +138,19 @@ function CreateProjectPage() {
       setRoomType(project.roomType ?? 'living-room')
       setStyle(project.style ?? 'japandi')
       setBudget(project.budget ?? 20000)
-      setRequirements(project.requirements ?? ['เพิ่มพื้นที่จัดเก็บ'])
       setDimensions(project.dimensions ?? { width: '', length: '', height: '' })
       setNotes(project.notes ?? '')
       const images = await getProjectImages(id).catch(() => [])
-      setExistingImageUrl(images[0]?.url ?? '')
+      setExistingImages(images)
     }).finally(() => setIsLoadingProject(false))
   }, [id])
 
+  const keptExistingImages = existingImages.filter((image) => !removedImageIds.includes(image.id))
+  const existingImageUrl = keptExistingImages[0]?.url ?? ''
+  const totalImages = keptExistingImages.length + roomImages.length
+
   useEffect(() => {
-    if (activeStep !== 2) return undefined
+    if (activeStep !== 1) return undefined
     const localImage = roomImages[0]
     const source = localImage?.file ?? existingImageUrl
     if (!source) return undefined
@@ -198,22 +210,25 @@ function CreateProjectPage() {
     )
     if (!validFiles.length) return
 
-    setRoomImages((current) => {
-      const remainingSlots = MAX_ROOM_IMAGES - current.length
-      setImageLimitNotice(remainingSlots < validFiles.length ? `อัปโหลดได้สูงสุด ${MAX_ROOM_IMAGES} ภาพต่อโปรเจกต์` : '')
-      if (remainingSlots <= 0) return current
+    const remainingSlots = MAX_ROOM_IMAGES - totalImages
+    setImageLimitNotice(remainingSlots < validFiles.length ? `อัปโหลดได้สูงสุด ${MAX_ROOM_IMAGES} ภาพต่อโปรเจกต์` : '')
+    if (remainingSlots <= 0) return
 
-      const newImages = validFiles.slice(0, remainingSlots).map((file) => {
-        const url = URL.createObjectURL(file)
-        imageUrlsRef.current.push(url)
-        return {
-          id: globalThis.crypto?.randomUUID?.() ?? `${file.name}-${file.lastModified}`,
-          file,
-          url,
-        }
-      })
-      return [...current, ...newImages]
+    const newImages = validFiles.slice(0, remainingSlots).map((file) => {
+      const url = URL.createObjectURL(file)
+      imageUrlsRef.current.push(url)
+      return {
+        id: globalThis.crypto?.randomUUID?.() ?? `${file.name}-${file.lastModified}`,
+        file,
+        url,
+      }
     })
+    setRoomImages((current) => [...current, ...newImages])
+  }
+
+  function removeExistingImage(imageId) {
+    setImageLimitNotice('')
+    setRemovedImageIds((current) => [...current, imageId])
   }
 
   function removeImage(id) {
@@ -228,22 +243,32 @@ function CreateProjectPage() {
     })
   }
 
-  function toggleRequirement(requirement) {
-    setRequirements((current) =>
-      current.includes(requirement)
-        ? current.filter((item) => item !== requirement)
-        : [...current, requirement],
-    )
+  const numericBudget = Number(budget) || 0
+
+  const hasRoomImage = totalImages > 0
+
+  const hasGeneratedWork = Boolean(existingProject && (existingProject.generatedImages?.length || existingProject.generatedImageUrl))
+  const changesInvalidateResults = Boolean(existingProject) && (
+    roomImages.length > 0
+    || removedImageIds.length > 0
+    || style !== existingProject.style
+    || roomType !== existingProject.roomType
+    || numericBudget !== existingProject.budget
+    || ['width', 'length', 'height'].some((field) => String(dimensions[field] ?? '') !== String(existingProject.dimensions?.[field] ?? ''))
+  )
+
+  function handleSubmit(event) {
+    event.preventDefault()
+    if (!hasRoomImage || !projectName.trim() || numericBudget < MIN_BUDGET) return
+    if (hasGeneratedWork && changesInvalidateResults) {
+      setShowResetNotice(true)
+      return
+    }
+    saveProject(false)
   }
 
-  const numericBudget = Number(budget) || 0
-  const budgetLabel = new Intl.NumberFormat('th-TH').format(numericBudget)
-
-  const hasRoomImage = roomImages.length > 0 || Boolean(existingProject?.hasRoomImage)
-
-  async function handleSubmit(event) {
-    event.preventDefault()
-    if (!hasRoomImage || !projectName.trim() || numericBudget < 100) return
+  async function saveProject(resetResults) {
+    setShowResetNotice(false)
     setIsSaving(true)
     setSaveError('')
 
@@ -252,7 +277,6 @@ function CreateProjectPage() {
       roomType,
       style,
       budget: numericBudget,
-      requirements,
       dimensions,
       notes: notes.trim(),
       hasRoomImage: true,
@@ -260,13 +284,25 @@ function CreateProjectPage() {
 
     try {
       if (existingProject) {
-        await updateProject(existingProject.id, payload)
         await saveProjectImages(existingProject.id, roomImages.map((image) => image.file))
+        await deleteProjectImagesByPath(existingImages.filter((image) => removedImageIds.includes(image.id)).map((image) => image.path))
+        await updateProject(existingProject.id, resetResults ? {
+          ...payload,
+          generatedImageUrl: null,
+          decisions: withWorkflowData({}, { generatedImages: [], detectedObjects: [], plannedProducts: [] }),
+          productSelections: {},
+          estimatedTotal: null,
+          stage: 'room-input',
+          status: 'in-progress',
+          progress: 16,
+        } : payload)
+        // The results are gone from the project; drop their pictures too (after the row, so a failure only leaves harmless files).
+        if (resetResults) await deleteGeneratedImages(existingProject.id).catch(() => {})
         navigate(`/project/${existingProject.id}`)
         return
       }
 
-      const project = await addProject(payload)
+      const project = await addProject({ ...payload, requirements: [] })
       await saveProjectImages(project.id, roomImages.map((image) => image.file))
       navigate(`/project/${project.id}`)
     } catch {
@@ -275,13 +311,17 @@ function CreateProjectPage() {
     }
   }
 
+  const dimensionErrors = {
+    width: getDimensionError('width', dimensions.width),
+    length: getDimensionError('length', dimensions.length),
+    height: getDimensionError('height', dimensions.height),
+  }
+  const hasDimensionError = Boolean(dimensionErrors.width || dimensionErrors.length || dimensionErrors.height)
+  const hasValidSize = Boolean(dimensions.width && dimensions.length) && !hasDimensionError
+
   const canContinue = activeStep === 0
-    ? Boolean(projectName.trim() && hasRoomImage)
-    : activeStep === 1
-      ? Boolean(dimensions.width && dimensions.length)
-      : activeStep === 2
-        ? numericBudget >= 100
-        : true
+    ? Boolean(projectName.trim() && hasRoomImage && hasValidSize)
+    : numericBudget >= 100
 
   function continueFlow() {
     if (!canContinue) return
@@ -354,7 +394,7 @@ function CreateProjectPage() {
           <form className="project-form" onSubmit={handleSubmit}>
             <section className={`project-section project-name-section ${activeStep === 0 ? '' : 'is-hidden'}`}>
               <div className="project-section-heading">
-                <span>00</span>
+                <span>01</span>
                 <div><h2>ตั้งชื่อโปรเจกต์</h2><p>ตั้งชื่อให้จำง่ายเพื่อค้นหาในคลังภายหลัง</p></div>
               </div>
               <label className="project-name-field">
@@ -371,38 +411,31 @@ function CreateProjectPage() {
             </section>
             <section className={`project-section ${activeStep === 0 ? '' : 'is-hidden'}`}>
               <div className="project-section-heading">
-                <span>01</span>
-                <div><h2>อัปโหลดภาพห้องเปล่า</h2><p>เพิ่มได้หลายห้อง เลือกหลายไฟล์พร้อมกัน หรือกลับมาเพิ่มทีละภาพก็ได้ (สูงสุด {MAX_ROOM_IMAGES} ภาพ)</p></div>
+                <span>02</span>
+                <div><h2>อัปโหลดภาพห้องเปล่า</h2><p>ใช้ภาพของห้องเดียวกันคนละมุม (สูงสุด {MAX_ROOM_IMAGES} ภาพ) ภาพแรกเป็นมุมหลักที่ใช้ตัดสินใจและเลือกสินค้า</p></div>
               </div>
 
               <label
-                className={`project-dropzone ${roomImages.length ? 'has-images' : ''} ${roomImages.length >= MAX_ROOM_IMAGES ? 'is-disabled' : ''}`.trim()}
+                className={`project-dropzone ${totalImages ? 'has-images' : ''} ${totalImages >= MAX_ROOM_IMAGES ? 'is-disabled' : ''}`.trim()}
                 htmlFor="project-room-image"
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={(event) => {
                   event.preventDefault()
-                  if (roomImages.length >= MAX_ROOM_IMAGES) return
+                  if (totalImages >= MAX_ROOM_IMAGES) return
                   selectFiles(event.dataTransfer.files)
                 }}
               >
-                {roomImages.length >= MAX_ROOM_IMAGES ? (
+                {totalImages >= MAX_ROOM_IMAGES ? (
                   <div className="project-upload-summary">
                     <span className="project-upload-icon"><Icon name="image" size={25} /></span>
                     <div><strong>ครบจำนวนสูงสุดแล้ว</strong><small>อัปโหลดได้สูงสุด {MAX_ROOM_IMAGES} ภาพต่อโปรเจกต์ · ลบภาพเดิมเพื่อเพิ่มใหม่</small></div>
                   </div>
-                ) : roomImages.length ? (
+                ) : totalImages ? (
                   <div className="project-upload-summary">
                     <span className="project-upload-icon"><Icon name="upload" size={25} /></span>
-                    <div><strong>เพิ่มภาพห้องอีก</strong><small>ขณะนี้มี {roomImages.length}/{MAX_ROOM_IMAGES} ห้อง</small></div>
+                    <div><strong>เพิ่มภาพมุมอื่นของห้องนี้</strong><small>ขณะนี้มี {totalImages}/{MAX_ROOM_IMAGES} มุม</small></div>
                     <span className="project-upload-cta">เพิ่มภาพ</span>
                   </div>
-                ) : existingProject?.hasRoomImage ? (
-                  <>
-                    <span className="project-upload-icon"><Icon name="image" size={25} /></span>
-                    <strong>โปรเจกต์นี้มีภาพห้องอยู่แล้ว</strong>
-                    <small>คลิกหรือลากไฟล์มาวางเพื่อเพิ่มภาพห้อง</small>
-                    <span className="project-upload-cta">เพิ่มภาพห้อง</span>
-                  </>
                 ) : (
                   <>
                     <span className="project-upload-icon"><Icon name="upload" size={25} /></span>
@@ -418,7 +451,7 @@ function CreateProjectPage() {
                 accept="image/jpeg,image/png,image/webp"
                 multiple
                 hidden
-                disabled={roomImages.length >= MAX_ROOM_IMAGES}
+                disabled={totalImages >= MAX_ROOM_IMAGES}
                 onChange={(event) => {
                   selectFiles(event.target.files)
                   event.target.value = ''
@@ -426,22 +459,29 @@ function CreateProjectPage() {
               />
               {imageLimitNotice ? <p className="project-upload-notice">{imageLimitNotice}</p> : null}
 
-              {roomImages.length ? (
-                <div className="project-image-grid" aria-label={`ภาพห้องที่เลือก ${roomImages.length} ภาพ`}>
+              {totalImages ? (
+                <div className="project-image-grid" aria-label={`ภาพห้องที่เลือก ${totalImages} ภาพ`}>
+                  {keptExistingImages.map((image, index) => (
+                    <figure className="project-image-card" key={image.id}>
+                      <img src={image.url} alt={`ภาพมุม ${index + 1}`} />
+                      <figcaption><span>มุม {String(index + 1).padStart(2, '0')}{index === 0 ? ' · มุมหลัก' : ''}</span><small>ภาพเดิม</small></figcaption>
+                      <button type="button" onClick={() => removeExistingImage(image.id)} aria-label={`ลบภาพมุม ${index + 1}`}>×</button>
+                    </figure>
+                  ))}
                   {roomImages.map((image, index) => (
                     <figure className="project-image-card" key={image.id}>
-                      <img src={image.url} alt={`ภาพห้อง ${index + 1}`} />
-                      <figcaption><span>ห้อง {String(index + 1).padStart(2, '0')}</span><small>{image.file.name}</small></figcaption>
-                      <button type="button" onClick={() => removeImage(image.id)} aria-label={`ลบภาพห้อง ${index + 1}`}>×</button>
+                      <img src={image.url} alt={`ภาพมุม ${keptExistingImages.length + index + 1}`} />
+                      <figcaption><span>มุม {String(keptExistingImages.length + index + 1).padStart(2, '0')}{keptExistingImages.length + index === 0 ? ' · มุมหลัก' : ''}</span><small>{image.file.name}</small></figcaption>
+                      <button type="button" onClick={() => removeImage(image.id)} aria-label={`ลบภาพมุม ${keptExistingImages.length + index + 1}`}>×</button>
                     </figure>
                   ))}
                 </div>
               ) : null}
             </section>
 
-            <section className={`project-section ${activeStep === 1 ? '' : 'is-hidden'}`}>
+            <section className={`project-section ${activeStep === 0 ? '' : 'is-hidden'}`}>
               <div className="project-section-heading">
-                <span>02</span>
+                <span>03</span>
                 <div><h2>ข้อมูลพื้นฐานของห้อง</h2><p>เลือกประเภทห้องและระบุขนาดโดยประมาณ</p></div>
               </div>
 
@@ -460,16 +500,37 @@ function CreateProjectPage() {
               </fieldset>
 
               <div className="project-fields-row project-dimensions">
-                <label><span>ความกว้าง <b>*</b></span><span className="project-input-unit"><input type="number" min="1" step="0.1" value={dimensions.width} onChange={(event) => setDimensions((current) => ({ ...current, width: event.target.value }))} placeholder="3.0" /><i>ม.</i></span></label>
-                <label><span>ความยาว <b>*</b></span><span className="project-input-unit"><input type="number" min="1" step="0.1" value={dimensions.length} onChange={(event) => setDimensions((current) => ({ ...current, length: event.target.value }))} placeholder="4.0" /><i>ม.</i></span></label>
-                <label><span>ความสูง</span><span className="project-input-unit"><input type="number" min="1" step="0.1" value={dimensions.height} onChange={(event) => setDimensions((current) => ({ ...current, height: event.target.value }))} placeholder="2.6" /><i>ม.</i></span></label>
+                {[
+                  { field: 'width', label: 'ความกว้าง', required: true, placeholder: '3.0' },
+                  { field: 'length', label: 'ความยาว', required: true, placeholder: '4.0' },
+                  { field: 'height', label: 'ความสูง', required: false, placeholder: '2.6' },
+                ].map(({ field, label, required, placeholder }) => (
+                  <label key={field}>
+                    <span>{label} {required ? <b>*</b> : <small>(ไม่บังคับ)</small>}</span>
+                    <span className="project-input-unit">
+                      <input
+                        type="number"
+                        min={DIMENSION_LIMITS[field].min}
+                        max={DIMENSION_LIMITS[field].max}
+                        step="0.1"
+                        inputMode="decimal"
+                        value={dimensions[field]}
+                        onChange={(event) => setDimensions((current) => ({ ...current, [field]: event.target.value }))}
+                        placeholder={placeholder}
+                        aria-invalid={dimensionErrors[field] ? 'true' : undefined}
+                      />
+                      <i>ม.</i>
+                    </span>
+                    {dimensionErrors[field] ? <em className="project-field-error" role="alert">{dimensionErrors[field]}</em> : null}
+                  </label>
+                ))}
               </div>
-              <p className="project-field-note">ขนาดห้องใช้สำหรับประเมิน Space Fit ใน V1 กรุณากรอกค่าที่วัดได้จริง</p>
+              <p className="project-field-note">ขนาดจริงของห้องช่วยให้ AI จัดเฟอร์นิเจอร์และเลือกสินค้าให้พอดีกับพื้นที่ — ภาพถ่ายบอกขนาดจริงไม่ได้ กรุณากรอกค่าที่วัดได้จริง</p>
             </section>
 
-            <section className={`project-section ${activeStep === 2 ? '' : 'is-hidden'}`}>
+            <section className={`project-section ${activeStep === 1 ? '' : 'is-hidden'}`}>
               <div className="project-section-heading project-style-heading">
-                <span>03</span>
+                <span>04</span>
                 <div><h2>สไตล์ที่เข้ากับห้อง</h2><p>AI อ่านภาพต้นฉบับและสุ่มแนวทางที่เหมาะกับพื้นที่จริง</p></div>
                 <button
                   type="button"
@@ -511,9 +572,9 @@ function CreateProjectPage() {
               </fieldset>
             </section>
 
-            <section className={`project-section ${activeStep === 2 ? '' : 'is-hidden'}`}>
+            <section className={`project-section ${activeStep === 1 ? '' : 'is-hidden'}`}>
               <div className="project-section-heading">
-                <span>04</span>
+                <span>05</span>
                 <div><h2>งบประมาณ</h2><p>ระบบจะใช้ยอดนี้เป็นข้อจำกัดในการเลือกชุดสินค้า</p></div>
               </div>
 
@@ -523,47 +584,26 @@ function CreateProjectPage() {
                   <span>฿</span>
                   <input
                     id="project-budget-input"
-                    type="number"
-                    min="100"
-                    max="1000000"
-                    step="100"
+                    type="text"
                     inputMode="numeric"
-                    value={budget}
-                    onChange={(event) => setBudget(event.target.value === '' ? '' : Number(event.target.value))}
-                    onBlur={() => setBudget((current) => Math.min(1000000, Math.max(100, Number(current) || 100)))}
+                    autoComplete="off"
+                    value={budget === '' ? '' : new Intl.NumberFormat('th-TH').format(budget)}
+                    onChange={(event) => {
+                      const digits = event.target.value.replace(/\D/g, '').slice(0, 7)
+                      setBudget(digits === '' ? '' : Math.min(MAX_BUDGET, Number(digits)))
+                    }}
+                    onBlur={() => setBudget((current) => Math.min(MAX_BUDGET, Math.max(MIN_BUDGET, Number(current) || MIN_BUDGET)))}
                     aria-describedby="project-budget-help"
                   />
-                  <i>บาท</i>
+                  <div className="project-budget-side">
+                    <div className="project-budget-stepper">
+                      <button type="button" aria-label="เพิ่มงบ 1,000 บาท" onClick={() => setBudget((current) => Math.min(MAX_BUDGET, (Number(current) || 0) + BUDGET_STEP))}>▲</button>
+                      <button type="button" aria-label="ลดงบ 1,000 บาท" onClick={() => setBudget((current) => Math.max(MIN_BUDGET, (Number(current) || 0) - BUDGET_STEP))}>▼</button>
+                    </div>
+                    <i>บาท</i>
+                  </div>
                 </div>
-                <div className="project-budget-help" id="project-budget-help"><span>฿100 – ฿1,000,000</span><span>ใช้สำหรับคัดสินค้าที่อยู่ในงบ</span></div>
-              </div>
-            </section>
-
-            <section className={`project-section ${activeStep === 3 ? '' : 'is-hidden'}`}>
-              <div className="project-section-heading">
-                <span>05</span>
-                <div><h2>ความต้องการเพิ่มเติม</h2><p>เลือกได้มากกว่าหนึ่งข้อเพื่อช่วยจัดลำดับ Function / Need</p></div>
-              </div>
-
-              <div className="project-requirements">
-                {REQUIREMENTS.map((requirement) => (
-                  <label className={requirements.includes(requirement) ? 'is-selected' : ''} key={requirement}>
-                    <input type="checkbox" checked={requirements.includes(requirement)} onChange={() => toggleRequirement(requirement)} />
-                    <span>{requirement}</span><i><Icon name="check" size={12} /></i>
-                  </label>
-                ))}
-              </div>
-
-              <div className="project-review-card">
-                <div className="project-review-heading"><span>PROJECT SUMMARY</span><strong>{projectName || 'ยังไม่ได้ตั้งชื่อโปรเจกต์'}</strong></div>
-                <dl>
-                  <div><dt>ภาพห้อง</dt><dd>{roomImages.length || (existingProject?.hasRoomImage ? 'มีอยู่แล้ว' : 0)} ภาพ</dd></div>
-                  <div><dt>ประเภท</dt><dd>{ROOM_TYPES.find((item) => item.value === roomType)?.label}</dd></div>
-                  <div><dt>ขนาด</dt><dd>{dimensions.width || '–'} × {dimensions.length || '–'}{dimensions.height ? ` × ${dimensions.height}` : ''} ม.</dd></div>
-                  <div><dt>สไตล์</dt><dd>{STYLES.find((item) => item.value === style)?.label}</dd></div>
-                  <div><dt>งบสูงสุด</dt><dd>฿{budgetLabel}</dd></div>
-                  <div><dt>ความต้องการ</dt><dd>{requirements.length ? `${requirements.length} ข้อ` : 'ไม่ระบุ'}</dd></div>
-                </dl>
+                <div className="project-budget-help" id="project-budget-help"><span>฿{new Intl.NumberFormat('th-TH').format(MIN_BUDGET)} – ฿{new Intl.NumberFormat('th-TH').format(MAX_BUDGET)}</span><span>ใช้สำหรับคัดสินค้าที่อยู่ในงบ</span></div>
               </div>
             </section>
 
@@ -571,12 +611,25 @@ function CreateProjectPage() {
               <div><strong>{saveError || `ขั้นตอน ${activeStep + 1} จาก ${CREATE_STEPS.length}`}</strong><span>{saveError ? 'ไฟล์เดิมยังอยู่ในหน้านี้' : CREATE_STEPS[activeStep].detail}</span></div>
               <div className="project-footer-actions">
                 {activeStep > 0 ? <button className="project-back-button" type="button" onClick={() => setActiveStep((current) => current - 1)}>ย้อนกลับ</button> : null}
-                {activeStep < CREATE_STEPS.length - 1 ? <button className="project-next-button" type="button" onClick={continueFlow} disabled={!canContinue}>ไปต่อ <Icon name="arrow" size={18} /></button> : <button className="project-next-button" type="submit" disabled={!hasRoomImage || !projectName.trim() || !dimensions.width || !dimensions.length || numericBudget < 100 || isSaving}>{isSaving ? 'กำลังบันทึกภาพ...' : existingProject ? 'บันทึกการแก้ไข' : 'สร้างโปรเจกต์และไปต่อ'} {!isSaving ? <Icon name="arrow" size={18} /> : null}</button>}
+                {activeStep < CREATE_STEPS.length - 1 ? <button className="project-next-button" type="button" onClick={continueFlow} disabled={!canContinue}>ไปต่อ <Icon name="arrow" size={18} /></button> : <button className="project-next-button" type="submit" disabled={!hasRoomImage || !projectName.trim() || !hasValidSize || numericBudget < MIN_BUDGET || isSaving}>{isSaving ? 'กำลังบันทึกภาพ...' : existingProject ? 'บันทึกการแก้ไข' : 'สร้างโปรเจกต์และไปต่อ'} {!isSaving ? <Icon name="arrow" size={18} /> : null}</button>}
               </div>
             </footer>
           </form>
         </main>
       </div>
+
+      {showResetNotice ? (
+        <div className="project-modal-backdrop" onClick={() => setShowResetNotice(false)}>
+          <div className="project-modal" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+            <strong>การแก้ไขนี้จะล้างผล AI เดิม</strong>
+            <p>คุณแก้รูปห้อง ขนาดห้อง สไตล์ งบ หรือประเภทห้อง ภาพ AI ที่สร้างไว้ ผลตัดสินใจ และสินค้าที่เลือก จะถูกล้างเพื่อให้ตรงกับค่าใหม่ ต้อง Generate ใหม่อีกครั้ง</p>
+            <div className="project-modal-actions">
+              <button type="button" onClick={() => setShowResetNotice(false)}>ยกเลิก</button>
+              <button type="button" className="is-danger" onClick={() => saveProject(true)}>บันทึกและล้างผลเดิม</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

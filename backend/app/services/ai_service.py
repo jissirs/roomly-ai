@@ -14,6 +14,7 @@ Three capabilities (see app/core/openai_client.py):
   and recommending keep/replace/remove (gpt-4o-mini).
 """
 
+import logging
 import re
 from typing import Any
 
@@ -23,8 +24,10 @@ import numpy as np
 import random
 
 from app.core.config import get_settings
-from app.core.openai_client import ask_json, ask_vision_json, edit_image, edit_image_region, generate_image
+from app.core.openai_client import ask_json, ask_vision_json, edit_image, edit_image_region, generate_image, pick_image_size
 from app.services.object_segmentation import segment_detected_objects
+
+logger = logging.getLogger(__name__)
 
 SCORE_LABELS = ["Function", "Space", "Budget", "Style", "Availability"]
 SCORE_MAX = [30, 25, 20, 15, 10]
@@ -229,11 +232,21 @@ async def detect_objects_in_room(image_url: str, original_image_url: str | None 
                 objects,
             )
         except (httpx.HTTPError, ImportError, OSError, RuntimeError, ValueError):
+            logger.exception("Object segmentation failed; returning no detected objects")
             # Wrong shapes are more harmful than missing ones in this UI.  The
             # frontend will show its demo fallback when local segmentation is
             # unavailable instead of drawing guessed coordinates over the room.
             return []
     return objects
+
+
+def image_size_for(image_bytes: bytes) -> str | None:
+    """gpt-image-1 canvas matching the photo's orientation; None if it cannot be decoded."""
+    decoded = cv2.imdecode(np.frombuffer(image_bytes, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
+    if decoded is None:
+        return None
+    height, width = decoded.shape[:2]
+    return pick_image_size(width, height)
 
 
 async def generate_room(
@@ -243,6 +256,8 @@ async def generate_room(
     requirements: list[str] | None = None,
     budget: int | None = None,
     products: list[dict[str, str]] | None = None,
+    room_size: dict[str, float | None] | None = None,
+    reference_room_url: str | None = None,
 ) -> bytes:
     """Generates a redesigned version of the room and returns raw PNG bytes.
 
@@ -278,7 +293,33 @@ async def generate_room(
     )
     if requirements:
         prompt += f" The room must also satisfy: {', '.join(requirements)}."
+    width = (room_size or {}).get("width")
+    length = (room_size or {}).get("length")
+    height = (room_size or {}).get("height")
+    if width and length:
+        size_text = f"about {width:g} m wide by {length:g} m long" + (f" with a {height:g} m ceiling" if height else "")
+        prompt += (
+            f" The real room measures {size_text} (floor area about {width * length:.1f} square metres). "
+            "Keep every piece of furniture at realistic scale for a room of exactly this size: do not "
+            "crowd it, do not use oversized pieces, and leave comfortable walkways of at least 0.8 m."
+        )
     reference_images: list[tuple[str, bytes, str]] = []
+    if image_url and reference_room_url:
+        # Another camera angle of this same room that was already designed:
+        # shown to the model so every angle ends up with the same furniture.
+        try:
+            async with httpx.AsyncClient(timeout=30) as angle_client:
+                angle_reply = await angle_client.get(reference_room_url)
+                angle_reply.raise_for_status()
+            angle_mime = angle_reply.headers.get("content-type", "image/png").split(";")[0]
+            reference_images.append(("angle_reference.png", angle_reply.content, angle_mime))
+            prompt += (
+                " Image 2 is an already-designed photo of THIS SAME room taken from a different camera angle. "
+                "Use exactly the same furniture, decor, colours, materials and layout as image 2, adapted to the "
+                "camera angle of image 1. Do not add, remove or restyle any piece."
+            )
+        except httpx.HTTPError:
+            pass
     if image_url and products:
         async with httpx.AsyncClient(timeout=30, follow_redirects=True) as product_client:
             for index, product in enumerate(products[:8], start=1):
@@ -294,12 +335,12 @@ async def generate_room(
         used = [item for item in products[:8] if item.get("_ref")]
         listing = "; ".join(f"image {item['_ref']} = {item['name']} ({item['category']})" for item in used)
         prompt += (
-            " IMPORTANT: image 1 is the room. The other images are REAL products for sale. "
+            " IMPORTANT: image 1 is the room. " + ("Image 2 is the reference angle. " if reference_images else "") + "The other images are REAL products for sale. "
             f"Furnish the room using exactly these products: {listing}. Reproduce each product's "
             "exact shape, colour, material and proportions faithfully and place each one naturally "
             "and at realistic scale. Do not invent other major furniture that is not in this list."
         )
-    elif budget is not None:
+    elif budget is not None and not reference_images:
         prompt += (
             f" HARD BUDGET LIMIT: the complete furniture and decor concept must be "
             f"realistically achievable within THB {budget:,}; use fewer, practical, "
@@ -314,7 +355,7 @@ async def generate_room(
             response = await http_client.get(image_url)
             response.raise_for_status()
             image_bytes = response.content
-        return await edit_image(prompt, image_bytes, reference_images or None)
+        return await edit_image(prompt, image_bytes, reference_images or None, size=image_size_for(image_bytes))
 
     return await generate_image(prompt)
 
@@ -371,8 +412,14 @@ async def regenerate_selected_object(
     instruction: str | None = None,
     style: str | None = None,
     budget: int | None = None,
+    product_name: str | None = None,
+    product_image_url: str | None = None,
 ) -> bytes:
-    """Regenerates or removes one selected object without redesigning the room."""
+    """Regenerates or removes one selected object without redesigning the room.
+
+    With `product_image_url` (a real store product photo) the selected object is
+    replaced by that exact product instead of an invented one.
+    """
     async with httpx.AsyncClient(timeout=30) as http_client:
         response = await http_client.get(image_url)
         response.raise_for_status()
@@ -383,6 +430,12 @@ async def regenerate_selected_object(
             f"Remove the selected {category} named {object_name} completely and "
             "reconstruct the wall, floor, shadows and any background naturally. "
             "Do not add a replacement object."
+        )
+    elif product_image_url:
+        requested_change = (
+            f"Replace only the selected {category} named {object_name} with EXACTLY the real product shown in "
+            f"the second image ({product_name or 'the product'}). Reproduce that product's exact shape, colour, material, "
+            "finish and proportions faithfully, and place it naturally at realistic scale. Do not invent a different design."
         )
     else:
         requested_change = (
@@ -398,7 +451,14 @@ async def regenerate_selected_object(
         "furniture, and every opaque pixel as faithfully as possible. Blend the edited "
         "area photorealistically with correct perspective and contact shadows."
     )
-    return await edit_image_region(prompt, source_png, mask_png)
+    references: list[tuple[str, bytes, str]] | None = None
+    if action == "replace" and product_image_url:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as product_client:
+            product_reply = await product_client.get(product_image_url)
+            product_reply.raise_for_status()
+        product_mime = product_reply.headers.get("content-type", "image/jpeg").split(";")[0]
+        references = [("product." + ("png" if "png" in product_mime else "webp" if "webp" in product_mime else "jpg"), product_reply.content, product_mime)]
+    return await edit_image_region(prompt, source_png, mask_png, size=image_size_for(response.content), reference_images=references)
 
 
 async def suggest_object_decisions(

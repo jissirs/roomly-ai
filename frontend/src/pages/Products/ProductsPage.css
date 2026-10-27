@@ -3,3 +3,42 @@
 .products-save-draft{justify-self:end;color:var(--color-taupe);font:10px var(--font-sans);background:transparent;border:0;cursor:pointer}.products-save-draft:hover{color:var(--color-white)}.products-category-tabs{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}.products-card-image{display:grid;place-items:center;background:#eeeae3}.products-card-image>img{object-fit:contain}.products-error{margin-top:15px;padding:11px 14px;color:#d18f87;font-size:10px;background:rgba(209,89,79,.07);border:1px solid rgba(209,89,79,.2);border-radius:10px}.products-catalog-note{margin:14px 2px 0;color:var(--color-warm-gray);font-size:8px;line-height:1.6}.products-preview>img{object-fit:cover}
 .products-card-source-note{margin-top:8px;color:var(--color-warm-gray);font-size:9px;line-height:1.6}.products-card-source-note a{color:var(--color-taupe);text-decoration:underline;text-underline-offset:2px}
 .products-card-source>span.is-homepro{background:#1e5fa8}
+.products-card-warning{min-height:0!important;margin-top:6px!important;color:#e0a88f!important;font-size:9px!important}
+
+.products-section-title{gap:12px;flex-wrap:wrap}
+.products-skip{min-height:34px;padding:0 14px;color:var(--color-taupe);font:600 9px var(--font-sans);background:transparent;border:1px solid rgba(220,204,170,.2);border-radius:999px;cursor:pointer}
+.products-skip:hover:not(:disabled){color:var(--color-white);border-color:rgba(220,204,170,.45)}
+.products-skip:disabled{color:#93ad86;border-color:rgba(147,173,134,.4);cursor:default}
+@media(max-width:650px){
+  .products-footer{gap:8px;padding:12px 14px}
+  .products-footer>div{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 10px}
+  .products-footer button{width:100%;min-height:44px}
+  .products-skip{min-height:44px;width:100%}
+}
+
+.products-card-price small.is-live{color:#93ad86}
+.products-card-price-diff{margin-top:4px;color:var(--color-warm-gray);font-size:9px;line-height:1.5}
+.products-card-price-diff.is-out{color:#e0a88f}
+.products-budget-note{margin-top:8px;color:var(--color-warm-gray);font-size:10px;line-height:1.5}
+.products-budget-status.is-over .products-budget-note{color:#dc9b91}
+
+.products-picture-sync{display:grid;gap:8px;margin-top:12px;padding:12px 14px;background:rgba(220,204,170,.05);border:1px solid rgba(220,204,170,.14);border-radius:12px}
+.products-picture-sync.is-match{background:rgba(127,191,106,.08);border-color:rgba(127,191,106,.3)}
+.products-picture-sync p{margin:0;font-size:10px;line-height:1.5}
+.products-picture-sync.is-match p{color:#a8c79b}
+.products-picture-sync button{min-height:40px;padding:0 14px;color:#1b1411;font:600 10px var(--font-sans);background:var(--color-cream);border:0;border-radius:999px;cursor:pointer}
+.products-picture-sync button:disabled{opacity:.5;cursor:not-allowed}
+.products-picture-sync small{color:var(--color-warm-gray);font-size:9px;line-height:1.5}
+.products-picture-sync small[role="alert"]{color:#e0a88f}
+.products-picture-sync small a{color:var(--color-cream)}
+
+.products-rebalance,.products-price-retry{margin:0 0 14px;padding:12px 16px;color:var(--color-cream);font-size:11px;line-height:1.6;background:rgba(220,204,170,.06);border:1px solid rgba(220,204,170,.2);border-radius:12px}
+.products-price-retry{color:#e0a88f}
+.products-price-retry button{margin-left:8px;padding:6px 12px;color:#1b1411;font:600 10px var(--font-sans);background:var(--color-cream);border:0;border-radius:999px;cursor:pointer}
+.products-modal{position:fixed;inset:0;z-index:50;display:grid;place-items:center;padding:16px;background:rgba(8,5,4,.72)}
+.products-modal>div{width:min(440px,100%);padding:24px;background:#211916;border:1px solid rgba(220,204,170,.2);border-radius:18px}
+.products-modal h2{margin:0 0 8px;font-size:18px}
+.products-modal p{margin:0 0 18px;color:var(--color-warm-gray);font-size:12px}
+.products-modal-actions{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
+.products-modal-actions button{min-height:40px;padding:0 14px;color:var(--color-white);font:600 11px var(--font-sans);background:transparent;border:1px solid rgba(220,204,170,.25);border-radius:999px;cursor:pointer}
+.products-modal-actions button.is-primary{color:#1b1411;background:var(--color-cream);border-color:var(--color-cream)}

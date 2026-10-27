@@ -67,26 +67,54 @@ create policy "Anyone can read products"
   on public.products for select
   using (true);
 
--- Room image storage: create a bucket named `room-images` in
--- Storage > New bucket (public, so uploaded photos load without signed URLs),
--- then run these policies so each user can only touch their own folder
--- (files are stored at `{project_id}/{filename}`, and project_id -> owner_id
--- is enforced by the `projects` RLS policy above at the app layer).
+-- Room image storage: bucket `room-images` (public read, so photos load without
+-- signed URLs). Files live at `{project_id}/{file}` (uploaded room photos) and
+-- `generated/{project_id}/{file}` (AI results). Writes are limited to the
+-- owner of that project; reading stays public because the URLs are unguessable
+-- and are handed to OpenAI/the browser directly.
 insert into storage.buckets (id, name, public)
 values ('room-images', 'room-images', true)
 on conflict (id) do nothing;
 
-create policy "Authenticated users can upload room images"
-  on storage.objects for insert
-  with check (bucket_id = 'room-images' and auth.role() = 'authenticated');
+drop policy if exists "Authenticated users can upload room images" on storage.objects;
+drop policy if exists "Authenticated users can delete room images" on storage.objects;
+drop policy if exists "Owners upload room images" on storage.objects;
+drop policy if exists "Owners delete room images" on storage.objects;
+drop policy if exists "Anyone can view room images" on storage.objects;
 
-create policy "Authenticated users can delete room images"
-  on storage.objects for delete
-  using (bucket_id = 'room-images' and auth.role() = 'authenticated');
+create policy "Owners upload room images"
+  on storage.objects for insert to authenticated
+  with check (
+    bucket_id = 'room-images'
+    and exists (
+      select 1 from public.projects p
+      where p.owner_id = auth.uid()
+        and p.id::text = case when (storage.foldername(name))[1] = 'generated'
+                              then (storage.foldername(name))[2]
+                              else (storage.foldername(name))[1] end
+    )
+  );
+
+create policy "Owners delete room images"
+  on storage.objects for delete to authenticated
+  using (
+    bucket_id = 'room-images'
+    and exists (
+      select 1 from public.projects p
+      where p.owner_id = auth.uid()
+        and p.id::text = case when (storage.foldername(name))[1] = 'generated'
+                              then (storage.foldername(name))[2]
+                              else (storage.foldername(name))[1] end
+    )
+  );
 
 create policy "Anyone can view room images"
   on storage.objects for select
   using (bucket_id = 'room-images');
+
+-- Keep obviously invalid values out of the table (the app enforces the same limits).
+alter table public.projects drop constraint if exists projects_budget_range;
+alter table public.projects add constraint projects_budget_range check (budget between 100 and 1000000) not valid;
 
 -- Project checkpoints: named snapshots of a project's editable state, so a
 -- user can roll back after changing style/budget/decisions/AI results.

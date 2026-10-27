@@ -3,6 +3,7 @@ import LandingPage from './pages/Landing/LandingPage'
 import LoginPage from './pages/Login/LoginPage'
 import RegisterPage from './pages/Register/RegisterPage'
 import ForgotPasswordPage from './pages/ForgotPassword/ForgotPasswordPage'
+import ResetPasswordPage from './pages/ResetPassword/ResetPasswordPage'
 import LibraryPage from './pages/Library/LibraryPage'
 import CreateProjectPage from './pages/CreateProject/CreateProjectPage'
 import ProjectDetailPage from './pages/ProjectDetail/ProjectDetailPage'
@@ -21,6 +22,7 @@ function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/home" element={<LibraryPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/create-project" element={<CreateProjectPage />} />
