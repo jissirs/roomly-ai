@@ -1,11 +1,9 @@
 import { getAccessToken } from './auth'
 
-// Only the AI backend lives here now (OpenAI calls need a server-side
-// secret key) — everything else (auth, projects, images, products) talks to
-// Supabase directly via lib/supabase.js.
-// A production build must be told where the API is; falling back to localhost
-// there would make every AI call fail on a visitor's own machine.
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? (import.meta.env.DEV ? 'http://localhost:8000/api/v1' : '')
+// Only the AI backend lives here — the `api` Supabase Edge Function (OpenAI
+// needs a server-side secret). Everything else (auth, projects, images,
+// products) talks to Supabase directly via lib/supabase.js.
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/api`
 
 export class ApiError extends Error {
   constructor(message, status) {
@@ -15,9 +13,8 @@ export class ApiError extends Error {
 }
 
 async function request(path, { method = 'GET', body } = {}) {
-  if (!API_BASE_URL) throw new ApiError('ยังไม่ได้ตั้งค่าที่อยู่ของระบบ AI (VITE_API_BASE_URL)', 0)
   const token = await getAccessToken()
-  const headers = { 'Content-Type': 'application/json' }
+  const headers = { 'Content-Type': 'application/json', apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY }
   if (token) headers.Authorization = `Bearer ${token}`
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
