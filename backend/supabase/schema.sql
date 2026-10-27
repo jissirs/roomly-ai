@@ -89,9 +89,9 @@ create policy "Owners upload room images"
     and exists (
       select 1 from public.projects p
       where p.owner_id = auth.uid()
-        and p.id::text = case when (storage.foldername(name))[1] = 'generated'
-                              then (storage.foldername(name))[2]
-                              else (storage.foldername(name))[1] end
+        and p.id::text = case when (storage.foldername(objects.name))[1] = 'generated'
+                              then (storage.foldername(objects.name))[2]
+                              else (storage.foldername(objects.name))[1] end
     )
   );
 
@@ -102,9 +102,9 @@ create policy "Owners delete room images"
     and exists (
       select 1 from public.projects p
       where p.owner_id = auth.uid()
-        and p.id::text = case when (storage.foldername(name))[1] = 'generated'
-                              then (storage.foldername(name))[2]
-                              else (storage.foldername(name))[1] end
+        and p.id::text = case when (storage.foldername(objects.name))[1] = 'generated'
+                              then (storage.foldername(objects.name))[2]
+                              else (storage.foldername(objects.name))[1] end
     )
   );
 
